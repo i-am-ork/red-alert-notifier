@@ -1,0 +1,490 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>מצב התרעות חולון</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --bg:        #0d1117;
+    --surface:   #161b22;
+    --card:      #1c2333;
+    --border:    #30363d;
+    --text:      #e6edf3;
+    --muted:     #8b949e;
+    --green:     #3fb950;
+    --red:       #f85149;
+    --orange:    #e3b341;
+    --yellow:    #f0c040;
+    --blue:      #58a6ff;
+  }
+
+  body {
+    font-family: 'Segoe UI', 'Arial', sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 20px;
+    direction: rtl;
+  }
+
+  .wrapper {
+    width: 100%;
+    max-width: 520px;
+  }
+
+  h1 {
+    text-align: center;
+    font-size: 1.5rem;
+    font-weight: 700;
+    margin-bottom: 24px;
+    color: var(--text);
+    letter-spacing: 0.02em;
+  }
+  h1 span { color: var(--red); }
+
+  /* ── Clock card ──────────────────────────────────────────────────────── */
+  .card {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 18px 22px;
+    margin-bottom: 14px;
+  }
+  .card-label {
+    font-size: 0.75rem;
+    color: var(--muted);
+    margin-bottom: 6px;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+  }
+  .card-value {
+    font-size: 1.2rem;
+    font-weight: 600;
+  }
+  #clock {
+    font-size: 2.8rem;
+    font-family: 'Courier New', monospace;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    text-align: center;
+    color: var(--blue);
+  }
+
+  /* ── Traffic light ─────────────────────────────────────────────────── */
+  .traffic-light {
+    display: inline-flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 8px;
+    background: #111;
+    border: 3px solid #2a2a2a;
+    border-radius: 16px;
+    padding: 12px 10px;
+    margin-bottom: 14px;
+  }
+  .tl-bulb {
+    width: 34px;
+    height: 34px;
+    border-radius: 50%;
+    background: #222;
+    transition: background 0.3s, box-shadow 0.3s;
+  }
+  .tl-bulb.on-red    { background: var(--red);    box-shadow: 0 0 16px 5px rgba(248,81,73,0.65); }
+  .tl-bulb.on-yellow { background: var(--yellow); box-shadow: 0 0 16px 5px rgba(240,192,64,0.65); }
+  .tl-bulb.on-green  { background: var(--green);  box-shadow: 0 0 16px 5px rgba(63,185,80,0.65); }
+  @keyframes blinkRed {
+    0%,100% { background: var(--red); box-shadow: 0 0 16px 5px rgba(248,81,73,0.65); }
+    50%     { background: #222; box-shadow: none; }
+  }
+  .tl-bulb.blink-red { animation: blinkRed 0.6s step-start infinite; }
+
+  /* ── Status card ─────────────────────────────────────────────────────── */
+  #statusCard {
+    border-radius: 14px;
+    padding: 28px 22px;
+    margin-bottom: 14px;
+    text-align: center;
+    border: 2px solid var(--border);
+    transition: border-color 0.3s, background 0.3s;
+    background: var(--card);
+  }
+  #statusCard.s-pre {
+    background: rgba(240,192,64,0.1);
+    border-color: var(--yellow);
+    animation: pulseYellow 1.2s ease-in-out infinite;
+  }
+  #statusCard.s-alert {
+    background: rgba(248,81,73,0.12);
+    border-color: var(--red);
+    animation: pulseBorder 0.7s ease-in-out infinite;
+  }
+  #statusCard.s-stay {
+    background: rgba(248,81,73,0.1);
+    border-color: var(--red);
+  }
+  #statusCard.s-clear {
+    background: rgba(63,185,80,0.1);
+    border-color: var(--green);
+  }
+
+  @keyframes pulseBorder {
+    0%,100% { border-color: var(--red); box-shadow: 0 0 0 0 rgba(248,81,73,0.4); }
+    50%      { border-color: rgba(248,81,73,0.4); box-shadow: 0 0 18px 4px rgba(248,81,73,0.25); }
+  }
+  @keyframes pulseYellow {
+    0%,100% { border-color: var(--yellow); box-shadow: 0 0 0 0 rgba(240,192,64,0.3); }
+    50%      { border-color: rgba(240,192,64,0.4); box-shadow: 0 0 14px 3px rgba(240,192,64,0.2); }
+  }
+
+  .status-icon  { font-size: 3.2rem; margin-bottom: 10px; line-height: 1; }
+  .status-main  { font-size: 1.45rem; font-weight: 700; line-height: 1.3; }
+  .status-sub   { font-size: 0.85rem; color: var(--muted); margin-top: 8px; }
+
+  .c-normal { color: var(--text); }
+  .c-pre    { color: var(--yellow); }
+  .c-alert  { color: var(--red); }
+  .c-stay   { color: var(--orange); }
+  .c-clear  { color: var(--green); }
+
+  @keyframes blink { 0%,100% { opacity:1; } 50% { opacity:0.45; } }
+  .blink { animation: blink 0.6s step-start infinite; }
+
+  /* ── Last siren card ─────────────────────────────────────────────────── */
+  #lastSirenVal { color: var(--blue); }
+
+  /* ── Buttons ─────────────────────────────────────────────────────────── */
+  .btn-row { display: flex; gap: 10px; margin-top: 4px; }
+  button {
+    flex: 1;
+    padding: 13px 10px;
+    border: none;
+    border-radius: 10px;
+    font-size: 0.95rem;
+    font-family: inherit;
+    font-weight: 600;
+    cursor: pointer;
+    transition: opacity 0.15s, transform 0.1s;
+    direction: rtl;
+  }
+  button:active { transform: scale(0.97); }
+  button:disabled { opacity: 0.45; cursor: default; }
+
+  #testBtn    { background: var(--red);    color: #fff; }
+  #testPreBtn { background: var(--yellow); color: #000; }
+  #resetBtn   { background: var(--surface); color: var(--muted); border: 1px solid var(--border); }
+  #testBtn:hover:not(:disabled)    { opacity: 0.85; }
+  #testPreBtn:hover:not(:disabled) { opacity: 0.85; }
+  #resetBtn:hover:not(:disabled)   { color: var(--text); }
+
+  /* ── Footer ──────────────────────────────────────────────────────────── */
+  .footer {
+    margin-top: 16px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 0.72rem;
+    color: var(--muted);
+  }
+  #apiStatus { display: flex; align-items: center; gap: 5px; }
+  .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--green); }
+  .dot.err { background: var(--red); }
+</style>
+</head>
+<body>
+<div class="wrapper">
+
+  <h1>🚨 מצב <span>צבע אדום</span> — חולון</h1>
+
+  <!-- Clock -->
+  <div class="card">
+    <div class="card-label">שעה נוכחית</div>
+    <div id="clock">--:--:--</div>
+  </div>
+
+  <!-- Status -->
+  <div id="statusCard">
+    <div class="traffic-light">
+      <div class="tl-bulb" id="tl-red"></div>
+      <div class="tl-bulb" id="tl-yellow"></div>
+      <div class="tl-bulb" id="tl-green"></div>
+    </div>
+    <div id="statusIcon" class="status-icon">⏳</div>
+    <div id="statusMain" class="status-main c-normal">טוען...</div>
+    <div id="statusSub"  class="status-sub"></div>
+  </div>
+
+  <!-- Last siren -->
+  <div class="card">
+    <div class="card-label">צבע אדום אחרון — אמיתי</div>
+    <div id="lastSirenVal" class="card-value">—</div>
+    <div class="card-label" style="margin-top:12px;">צבע אדום אחרון — בדיקה</div>
+    <div id="lastTestVal" class="card-value" style="color:var(--orange);">—</div>
+    <div class="card-label" style="margin-top:12px;">הכל בסדר החל מ</div>
+    <div id="lastClearVal" class="card-value" style="color:var(--green);">—</div>
+  </div>
+
+  <!-- Cities config -->
+  <div class="card">
+    <div class="card-label">ערים במעקב (מופרדות בפסיק)</div>
+    <div style="display:flex;gap:8px;margin-top:6px;align-items:center;">
+      <input id="citiesInput" type="text" dir="rtl"
+        style="flex:1;background:#0d1117;border:1px solid var(--border);border-radius:8px;
+               padding:10px 12px;color:var(--text);font-size:1rem;font-family:inherit;outline:none;"
+        placeholder="חולון, בת ים, ראשון לציון"
+        onfocus="this.style.borderColor='var(--blue)'"
+        onblur="this.style.borderColor='var(--border)'"
+        onkeydown="if(event.key==='Enter')saveCities()" />
+      <button onclick="saveCities()"
+        style="flex:none;padding:10px 16px;background:var(--blue);color:#000;border-radius:8px;
+               border:none;font-weight:700;font-family:inherit;cursor:pointer;font-size:0.9rem;">
+        שמור
+      </button>
+    </div>
+    <div id="citiesFeedback" style="font-size:0.75rem;color:var(--muted);margin-top:5px;min-height:1em;"></div>
+  </div>
+
+  <!-- Buttons -->
+  <div class="btn-row">
+    <button id="testBtn"    onclick="runTest()">🔔 בדיקת התרעה</button>
+    <button id="testPreBtn" onclick="runTestPre()">⚠️ בדיקת טרום-התרעה</button>
+    <button id="resetBtn"   onclick="runReset()">↺ אפס מצב</button>
+  </div>
+
+  <!-- Footer -->
+  <div class="footer">
+    <div id="apiStatus">
+      <div class="dot" id="apiDot"></div>
+      <span id="apiLabel">מתחבר...</span>
+    </div>
+    <div id="lastUpdate"></div>
+  </div>
+
+</div>
+<script>
+// ── Clock ──────────────────────────────────────────────────────────────────
+function tick() {
+  const now = new Date();
+  const pad = n => String(n).padStart(2, '0');
+  document.getElementById('clock').textContent =
+    `${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(now.getSeconds())}`;
+}
+setInterval(tick, 1000);
+tick();
+
+// ── Format ISO date string to readable Hebrew locale ──────────────────────
+function fmt(iso) {
+  if (!iso) return '—';
+  try {
+    const d = new Date(iso);
+    if (isNaN(d)) return iso;
+    return d.toLocaleString('he-IL', {
+      day: '2-digit', month: '2-digit', year: 'numeric',
+      hour: '2-digit', minute: '2-digit', second: '2-digit',
+      hour12: false
+    });
+  } catch { return iso; }
+}
+
+// ── Status definitions ────────────────────────────────────────────────────
+const STATUS_MAP = {
+  normal: {
+    cls: '',
+    icon: '✅',
+    main: '<span class="c-normal">מצב רגיל</span>',
+    sub:  null,
+  },
+  pre_alert: {
+    cls: 's-pre',
+    icon: '⚠️',
+    main: '<span class="c-pre">התקרבו למרחב המוגן!</span>',
+    sub:  'צפויות התרעות בדקות הקרובות באזורכם — היו קרובים לממד',
+  },
+  alert: {
+    cls: 's-alert',
+    icon: '🚨',
+    main: '<span class="c-alert blink">ירי רקטות! היכנסו למרחב המוגן!</span>',
+    sub:  'שהו במרחב המוגן — התגוננות עכשיו',
+  },
+  stay: {
+    cls: 's-stay',
+    icon: '🔴',
+    main: '<span class="c-stay">שהו במרחב המוגן</span>',
+    sub:  'ממתין להסרת התראה רשמית מפיקוד העורף — אין לצאת עדיין',
+  },
+  clear: {
+    cls: 's-clear',
+    icon: '🟢',
+    main: '<span class="c-clear">ניתן לצאת ממרחב המוגן</span>',
+    sub:  'הסרת התראה רשמית התקבלה מפיקוד העורף',
+  },
+};
+
+// ── Traffic light ────────────────────────────────────────────────────────
+const TL_MAP = {
+  normal:    { red: false, yellow: false, green: true,  blinkRed: false },
+  pre_alert: { red: false, yellow: true,  green: false, blinkRed: false },
+  alert:     { red: true,  yellow: false, green: false, blinkRed: true  },
+  stay:      { red: true,  yellow: false, green: false, blinkRed: false },
+  clear:     { red: false, yellow: false, green: true,  blinkRed: false },
+};
+function updateTrafficLight(status) {
+  const t = TL_MAP[status] || TL_MAP.normal;
+  const r = document.getElementById('tl-red');
+  const y = document.getElementById('tl-yellow');
+  const g = document.getElementById('tl-green');
+  r.className = 'tl-bulb' + (t.red ? (t.blinkRed ? ' blink-red' : ' on-red') : '');
+  y.className = 'tl-bulb' + (t.yellow ? ' on-yellow' : '');
+  g.className = 'tl-bulb' + (t.green  ? ' on-green'  : '');
+}
+
+// ── Update UI from API response ───────────────────────────────────────────
+function updateUI(data) {
+  const s = STATUS_MAP[data.status] || STATUS_MAP.normal;
+
+  const card = document.getElementById('statusCard');
+  card.className = s.cls;
+  updateTrafficLight(data.status);
+  document.getElementById('statusIcon').textContent = s.icon;
+  document.getElementById('statusMain').innerHTML = s.main;
+
+  // For 'clear', append the timestamp to sub-text
+  let sub = s.sub;
+  if (data.status === 'normal' && data.watched_cities) {
+    sub = 'אין התרעות פעילות באזור ' + data.watched_cities.join(', ');
+  } else if (data.status === 'clear' && data.last_clear_time) {
+    sub += '<br><small>הסרה בשעה: ' + fmt(data.last_clear_time) + '</small>';
+  }
+  document.getElementById('statusSub').innerHTML = sub;
+
+  // Last siren
+  document.getElementById('lastSirenVal').textContent = fmt(data.last_siren_time);
+  document.getElementById('lastTestVal').textContent  = fmt(data.last_test_time);
+  const clearEl = document.getElementById('lastClearVal');
+  if (data.last_clear_time) {
+    clearEl.textContent = fmt(data.last_clear_time);
+    clearEl.style.color = 'var(--green)';
+  } else {
+    clearEl.textContent = 'לא נרשם בהיסטוריה הזמינה';
+    clearEl.style.color = 'var(--muted)';
+  }
+
+  // Cities input — populate only if user isn't currently editing
+  const inp = document.getElementById('citiesInput');
+  if (document.activeElement !== inp && data.watched_cities) {
+    inp.value = data.watched_cities.join(', ');
+  }
+
+  // API connectivity indicator
+  const dot   = document.getElementById('apiDot');
+  const label = document.getElementById('apiLabel');
+  if (data.api_reachable) {
+    dot.className = 'dot';
+    label.textContent = 'מחובר לפיקוד העורף';
+  } else {
+    dot.className = 'dot err';
+    label.textContent = 'שגיאת תקשורת עם פיקוד העורף';
+  }
+
+  // Last update timestamp
+  if (data.last_api_check) {
+    document.getElementById('lastUpdate').textContent =
+      'עדכון: ' + fmt(data.last_api_check);
+  }
+}
+
+// ── Cities field ──────────────────────────────────────────────────────────
+async function saveCities() {
+  const val = document.getElementById('citiesInput').value.trim();
+  if (!val) return;
+  const fb = document.getElementById('citiesFeedback');
+  try {
+    const res = await fetch('/api/cities', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({cities: val})
+    });
+    const data = await res.json();
+    if (res.ok) {
+      fb.style.color = 'var(--green)';
+      fb.textContent = 'נשמר: ' + data.cities.join(', ');
+    } else {
+      fb.style.color = 'var(--red)';
+      fb.textContent = data.error || 'שגיאה';
+    }
+  } catch {
+    fb.style.color = 'var(--red)';
+    fb.textContent = 'שגיאת תקשורת';
+  }
+  setTimeout(() => { fb.textContent = ''; }, 4000);
+  await poll();
+}
+
+// ── Poll backend ──────────────────────────────────────────────────────────
+async function poll() {
+  try {
+    const res = await fetch('/api/status');
+    if (res.ok) updateUI(await res.json());
+  } catch (e) {
+    document.getElementById('apiDot').className = 'dot err';
+  }
+}
+setInterval(poll, 3000);
+poll();
+
+// ── Test button ───────────────────────────────────────────────────────────
+async function runTest() {
+  const btn = document.getElementById('testBtn');
+  btn.disabled = true;
+  btn.textContent = '⏳ מדמה התרעה...';
+  try {
+    await fetch('/api/test', { method: 'POST' });
+    await poll();
+  } finally {
+    setTimeout(() => {
+      btn.disabled = false;
+      btn.textContent = '🔔 בדיקת התרעה';
+    }, 8000);
+  }
+}
+
+// ── Pre-alert test button ─────────────────────────────────────────────────
+async function runTestPre() {
+  const btn = document.getElementById('testPreBtn');
+  btn.disabled = true;
+  btn.textContent = '⏳ מדמה טרום-התרעה...';
+  try {
+    const res = await fetch('/api/test_pre', { method: 'POST' });
+    const data = await res.json();
+    if (!data.ok) {
+      // Blocked — show why and re-enable immediately
+      const labels = { alert: 'התרעה פעילה', stay: 'ממתין להסרה', clear: 'הסרה פעילה' };
+      btn.textContent = '⚠️ חסום: ' + (labels[data.reason] || data.reason);
+      btn.disabled = false;
+      setTimeout(() => { btn.textContent = '⚠️ בדיקת טרום-התרעה'; }, 3000);
+      return;
+    }
+    await poll();
+  } finally {
+    setTimeout(() => {
+      if (!btn.disabled) return;  // already re-enabled by block path
+      btn.disabled = false;
+      btn.textContent = '⚠️ בדיקת טרום-התרעה';
+    }, 11000);
+  }
+}
+
+// ── Reset button ──────────────────────────────────────────────────────────
+async function runReset() {
+  await fetch('/api/reset', { method: 'POST' });
+  await poll();
+}
+</script>
+</body>
+</html>
