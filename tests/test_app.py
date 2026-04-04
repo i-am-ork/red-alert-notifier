@@ -24,6 +24,7 @@ from app import (
     monitor,
     AlertMonitor,
     OrefClient,
+    _data_cache,
     SIREN_CATEGORIES,
     NON_EVENT_CATEGORIES,
     ALL_CLEAR_PHRASES,
@@ -914,3 +915,83 @@ class TestScenarios:
             make_history_entry("חיפה - מערב", 1, "ירי רקטות", "2026-04-03 12:00:00"),
         ])
         assert monitor.last_siren_time == "2026-04-03 12:00:00"
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# MULTI-USER / STATELESS ?cities= ENDPOINT TESTS
+# ═══════════════════════════════════════════════════════════════════════════════
+
+@pytest.fixture
+def cache_client():
+    """Flask test client with a clean DataCache (no live alert, no history)."""
+    _data_cache.update_current(None, True, "2026-04-03T12:00:00")
+    _data_cache.update_history([])
+    with flask_app.test_client() as c:
+        yield c
+
+
+class TestMultiUser:
+
+    def test_no_alert_returns_normal(self, cache_client):
+        d = cache_client.get("/api/status?cities=חולון").get_json()
+        assert d["status"] == "normal"
+
+    def test_alert_for_watched_city(self, cache_client):
+        _data_cache.update_current(make_alert(["חולון"]), True, "2026-04-03T12:00:00")
+        d = cache_client.get("/api/status?cities=חולון").get_json()
+        assert d["status"] == "alert"
+
+    def test_alert_does_not_affect_different_city(self, cache_client):
+        """User watching תל אביב is unaffected by a חולון alert."""
+        _data_cache.update_current(make_alert(["חולון"]), True, "2026-04-03T12:00:00")
+        d = cache_client.get("/api/status?cities=%D7%AA%D7%9C+%D7%90%D7%91%D7%99%D7%91").get_json()
+        assert d["status"] == "normal"
+
+    def test_two_users_independent_simultaneously(self, cache_client):
+        """Two concurrent city sets each get the correct independent status."""
+        _data_cache.update_current(make_alert(["חולון", "בת ים"]), True, "2026-04-03T12:00:00")
+        holon = cache_client.get("/api/status?cities=חולון").get_json()
+        ta    = cache_client.get("/api/status?cities=תל+אביב").get_json()
+        assert holon["status"] == "alert"
+        assert ta["status"]    == "normal"
+
+    def test_multi_city_user_sees_alert_if_any_match(self, cache_client):
+        """A user watching both תל אביב and חולון gets alert when חולון fires."""
+        _data_cache.update_current(make_alert(["חולון"]), True, "2026-04-03T12:00:00")
+        d = cache_client.get("/api/status?cities=תל+אביב,חולון").get_json()
+        assert d["status"] == "alert"
+
+    def test_watched_cities_returned_in_response(self, cache_client):
+        d = cache_client.get("/api/status?cities=חולון,בת+ים").get_json()
+        assert set(d["watched_cities"]) == {"חולון", "בת ים"}
+
+    def test_stay_status_from_history(self, cache_client):
+        """Unacknowledged siren in history → stay (no live alert, no clear)."""
+        _data_cache.update_history([
+            make_history_entry("חולון", 1, "ירי רקטות", "2026-04-03 12:00:00"),
+        ])
+        d = cache_client.get("/api/status?cities=חולון").get_json()
+        assert d["status"] == "stay"
+
+    def test_clear_status_from_history(self, cache_client):
+        """All-clear most-recent entry → clear status."""
+        _data_cache.update_history([
+            make_history_entry("חולון", 13, "האירוע הסתיים", "2026-04-03 12:05:00"),
+            make_history_entry("חולון", 1,  "ירי רקטות",    "2026-04-03 12:00:00"),
+        ])
+        d = cache_client.get("/api/status?cities=חולון").get_json()
+        assert d["status"] == "clear"
+
+    def test_history_for_other_city_does_not_affect_user(self, cache_client):
+        """Siren history for אשדוד must not affect a user watching חולון."""
+        _data_cache.update_history([
+            make_history_entry("אשדוד", 1, "ירי רקטות", "2026-04-03 12:00:00"),
+        ])
+        d = cache_client.get("/api/status?cities=חולון").get_json()
+        assert d["status"] == "normal"
+
+    def test_no_cities_param_falls_back_to_global_monitor(self, cache_client, reset_state):
+        """Calling /api/status with no ?cities= returns the global monitor state."""
+        d = cache_client.get("/api/status").get_json()
+        assert d["status"] == monitor.status
+        assert "watched_cities" in d

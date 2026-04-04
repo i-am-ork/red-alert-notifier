@@ -1,2 +1,3 @@
 [build]
 builder = "nixpacks"
+buildCommand = "bash run_tests.sh -q"
