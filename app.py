@@ -44,6 +44,36 @@ NON_EVENT_CATEGORIES = {14}
 DEFAULT_CITIES = ["חולון"]
 
 
+# ── Raw data cache (written by background thread, read per-request) ────────
+
+class DataCache:
+    """Stores the latest raw API data for stateless per-request status computation."""
+
+    def __init__(self):
+        self._lock = threading.Lock()
+        self.current_alert: dict | None = None
+        self.history: list = []
+        self.last_api_check: str | None = None
+        self.api_reachable: bool = True
+
+    def update_current(self, alert: dict | None, ok: bool, ts: str) -> None:
+        with self._lock:
+            self.current_alert = alert
+            self.api_reachable = ok
+            self.last_api_check = ts
+
+    def update_history(self, history: list) -> None:
+        with self._lock:
+            self.history = history
+
+    def snapshot(self) -> tuple[dict | None, list, bool, str | None]:
+        with self._lock:
+            return self.current_alert, list(self.history), self.api_reachable, self.last_api_check
+
+
+_data_cache = DataCache()
+
+
 # ── Pikud HaOref HTTP client ───────────────────────────────────────────────
 
 class OrefClient:
@@ -344,6 +374,11 @@ class AlertMonitor:
                 alert, api_ok, prev_siren_active, prev_pre_active
             )
 
+            # Also feed the stateless data cache used by the per-user API
+            with self._lock:
+                ts = self.last_api_check or il_now().isoformat()
+            _data_cache.update_current(alert, api_ok, ts)
+
             # ── Poll history less frequently ───────────────────────────────
             now_t = time.monotonic()
             if now_t - last_history_t >= HISTORY_POLL_SEC:
@@ -352,6 +387,8 @@ class AlertMonitor:
                     history = OrefClient.get_history()
                     if history:
                         self.process_history(history)
+                        # Keep history cache in sync too
+                        _data_cache.update_history(history)
                 except Exception as exc:
                     print(f"[oref history] {exc}")
 
@@ -369,7 +406,86 @@ app = Flask(__name__)
 
 @app.route("/api/status")
 def api_status():
-    return jsonify(monitor.get_status_dict())
+    """
+    Stateless per-user status endpoint.
+    Query param: cities=חולון,תל אביב  (comma-separated, URL-encoded).
+    Falls back to the global monitor state when no cities param is given
+    (backward compatibility for tests / direct calls).
+    """
+    raw = flask_request.args.get("cities", "")
+    if not raw.strip():
+        return jsonify(monitor.get_status_dict())
+
+    watched = {c.strip() for c in raw.split(",") if c.strip()}
+    if not watched:
+        return jsonify(monitor.get_status_dict())
+
+    alert, history, api_reachable, last_api_check = _data_cache.snapshot()
+
+    # ── Determine live signal for these cities ─────────────────────────────
+    siren_active = False
+    pre_active = False
+    explicit_clear = False
+
+    if api_reachable and alert:
+        cities_in_alert = alert.get("data", [])
+        if any(AlertMonitor.city_matches_watched(c, watched) for c in cities_in_alert):
+            if AlertMonitor.alert_is_all_clear(alert):
+                explicit_clear = True
+            else:
+                cat = AlertMonitor.alert_cat(alert)
+                if cat in NON_EVENT_CATEGORIES:
+                    pre_active = True
+                elif cat != 0:
+                    siren_active = True
+
+    # ── Derive status and timestamps from history ──────────────────────────
+    last_siren_time: str | None = None
+    last_clear_time: str | None = None
+    last_watched_event = None
+
+    for entry in history:
+        city = entry.get("data", "")
+        if not AlertMonitor.city_matches_watched(city, watched):
+            continue
+        cat = entry.get("category", 0)
+        if cat in NON_EVENT_CATEGORIES:
+            continue
+        if last_watched_event is None:
+            last_watched_event = entry
+        if AlertMonitor.entry_is_all_clear(entry):
+            if last_clear_time is None:
+                last_clear_time = entry.get("alertDate")
+        elif cat in SIREN_CATEGORIES:
+            if last_siren_time is None:
+                last_siren_time = entry.get("alertDate")
+
+    # ── Final status ──────────────────────────────────────────────────────
+    if siren_active:
+        status = "alert"
+        if last_siren_time is None:
+            last_siren_time = last_api_check
+    elif explicit_clear:
+        status = "clear"
+        if last_clear_time is None:
+            last_clear_time = last_api_check
+    elif pre_active:
+        status = "pre_alert"
+    elif last_watched_event is None:
+        status = "normal"
+    elif AlertMonitor.entry_is_all_clear(last_watched_event):
+        status = "clear"
+    else:
+        status = "stay"
+
+    return jsonify({
+        "status": status,
+        "last_siren_time": last_siren_time,
+        "last_clear_time": last_clear_time,
+        "last_api_check": last_api_check,
+        "api_reachable": api_reachable,
+        "watched_cities": sorted(watched),
+    })
 
 
 @app.route("/api/cities", methods=["GET"])

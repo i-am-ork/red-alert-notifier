@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>מצב התרעות חולון</title>
+<title>מצב התרעות</title>
 <style>
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
@@ -200,7 +200,7 @@
 <body>
 <div class="wrapper">
 
-  <h1>🚨 מצב <span>צבע אדום</span> — חולון</h1>
+  <h1>🚨 מצב <span>צבע אדום</span> — <span id="titleCities">...</span></h1>
 
   <!-- Clock -->
   <div class="card">
@@ -268,6 +268,27 @@
 
 </div>
 <script>
+// ── Per-user city state (localStorage) ──────────────────────────────────────
+const LS_KEY = 'watchedCities';
+const DEFAULT_CITIES_STR = 'חולון';
+
+function getCitiesStr() {
+  return (localStorage.getItem(LS_KEY) || DEFAULT_CITIES_STR).trim();
+}
+
+function updateTitle(citiesStr) {
+  const label = citiesStr || DEFAULT_CITIES_STR;
+  document.getElementById('titleCities').textContent = label;
+  document.title = 'מצב התרעות — ' + label;
+}
+
+// Populate input and title on load
+(function initCities() {
+  const saved = getCitiesStr();
+  document.getElementById('citiesInput').value = saved;
+  updateTitle(saved);
+})();
+
 // ── Clock ──────────────────────────────────────────────────────────────────
 function tick() {
   const now = new Date();
@@ -375,12 +396,6 @@ function updateUI(data) {
     clearEl.style.color = 'var(--muted)';
   }
 
-  // Cities input — populate only if user isn't currently editing
-  const inp = document.getElementById('citiesInput');
-  if (document.activeElement !== inp && data.watched_cities) {
-    inp.value = data.watched_cities.join(', ');
-  }
-
   // API connectivity indicator
   const dot   = document.getElementById('apiDot');
   const label = document.getElementById('apiLabel');
@@ -400,36 +415,24 @@ function updateUI(data) {
 }
 
 // ── Cities field ──────────────────────────────────────────────────────────
-async function saveCities() {
+function saveCities() {
   const val = document.getElementById('citiesInput').value.trim();
   if (!val) return;
   const fb = document.getElementById('citiesFeedback');
-  try {
-    const res = await fetch('/api/cities', {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({cities: val})
-    });
-    const data = await res.json();
-    if (res.ok) {
-      fb.style.color = 'var(--green)';
-      fb.textContent = 'נשמר: ' + data.cities.join(', ');
-    } else {
-      fb.style.color = 'var(--red)';
-      fb.textContent = data.error || 'שגיאה';
-    }
-  } catch {
-    fb.style.color = 'var(--red)';
-    fb.textContent = 'שגיאת תקשורת';
-  }
-  setTimeout(() => { fb.textContent = ''; }, 4000);
-  await poll();
+  localStorage.setItem(LS_KEY, val);
+  updateTitle(val);
+  fb.style.color = 'var(--green)';
+  fb.textContent = 'נשמר בדפדפן: ' + val;
+  setTimeout(() => { fb.textContent = ''; }, 3000);
+  poll();
 }
 
 // ── Poll backend ──────────────────────────────────────────────────────────
 async function poll() {
+  const cities = getCitiesStr();
+  const param = encodeURIComponent(cities);
   try {
-    const res = await fetch('/api/status');
+    const res = await fetch('/api/status?cities=' + param);
     if (res.ok) updateUI(await res.json());
   } catch (e) {
     document.getElementById('apiDot').className = 'dot err';
@@ -438,52 +441,75 @@ async function poll() {
 setInterval(poll, 3000);
 poll();
 
+// ── Client-side test simulation (no server calls — per-user) ─────────────
+let _testOverride = null;   // { status, last_siren_time, last_clear_time } | null
+let _testTimer = null;
+
+function _clearTestOverride() {
+  _testOverride = null;
+  _testTimer = null;
+}
+
+// Fake a single poll result from a test override, merged with real data shape
+function _buildFakeData(fakeStatus, sirenTime) {
+  return {
+    status: fakeStatus,
+    last_siren_time: sirenTime,
+    last_clear_time: fakeStatus === 'clear' ? new Date().toISOString() : null,
+    last_api_check: new Date().toISOString(),
+    api_reachable: true,
+    watched_cities: getCitiesStr().split(',').map(s => s.trim()),
+  };
+}
+
 // ── Test button ───────────────────────────────────────────────────────────
-async function runTest() {
+function runTest() {
   const btn = document.getElementById('testBtn');
+  if (_testOverride) return;  // already running a simulation
+  const now = new Date().toISOString();
   btn.disabled = true;
   btn.textContent = '⏳ מדמה התרעה...';
-  try {
-    await fetch('/api/test', { method: 'POST' });
-    await poll();
-  } finally {
-    setTimeout(() => {
-      btn.disabled = false;
-      btn.textContent = '🔔 בדיקת התרעה';
-    }, 8000);
-  }
+  updateUI(_buildFakeData('alert', now));
+  _testTimer = setTimeout(() => {
+    updateUI(_buildFakeData('stay', now));
+    btn.disabled = false;
+    btn.textContent = '🔔 בדיקת התרעה';
+    _clearTestOverride();
+    poll();
+  }, 5000);
+  _testOverride = {status: 'alert', sirenTime: now};
 }
 
 // ── Pre-alert test button ─────────────────────────────────────────────────
-async function runTestPre() {
+function runTestPre() {
   const btn = document.getElementById('testPreBtn');
+  if (_testOverride) {
+    // Blocked — active simulation in progress
+    btn.textContent = '⚠️ חסום: בדיקה פעילה';
+    setTimeout(() => { btn.textContent = '⚠️ בדיקת טרום-התרעה'; }, 2500);
+    return;
+  }
   btn.disabled = true;
   btn.textContent = '⏳ מדמה טרום-התרעה...';
-  try {
-    const res = await fetch('/api/test_pre', { method: 'POST' });
-    const data = await res.json();
-    if (!data.ok) {
-      // Blocked — show why and re-enable immediately
-      const labels = { alert: 'התרעה פעילה', stay: 'ממתין להסרה', clear: 'הסרה פעילה' };
-      btn.textContent = '⚠️ חסום: ' + (labels[data.reason] || data.reason);
-      btn.disabled = false;
-      setTimeout(() => { btn.textContent = '⚠️ בדיקת טרום-התרעה'; }, 3000);
-      return;
-    }
-    await poll();
-  } finally {
-    setTimeout(() => {
-      if (!btn.disabled) return;  // already re-enabled by block path
-      btn.disabled = false;
-      btn.textContent = '⚠️ בדיקת טרום-התרעה';
-    }, 11000);
-  }
+  updateUI(_buildFakeData('pre_alert', null));
+  _testOverride = {status: 'pre_alert'};
+  _testTimer = setTimeout(() => {
+    btn.disabled = false;
+    btn.textContent = '⚠️ בדיקת טרום-התרעה';
+    _clearTestOverride();
+    poll();
+  }, 8000);
 }
 
 // ── Reset button ──────────────────────────────────────────────────────────
-async function runReset() {
-  await fetch('/api/reset', { method: 'POST' });
-  await poll();
+function runReset() {
+  if (_testTimer) clearTimeout(_testTimer);
+  _clearTestOverride();
+  document.getElementById('testBtn').disabled = false;
+  document.getElementById('testBtn').textContent = '🔔 בדיקת התרעה';
+  document.getElementById('testPreBtn').disabled = false;
+  document.getElementById('testPreBtn').textContent = '⚠️ בדיקת טרום-התרעה';
+  poll();
 }
 </script>
 </body>
