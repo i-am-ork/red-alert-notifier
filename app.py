@@ -551,9 +551,13 @@ def api_reset():
 
 # ── HTML frontend ──────────────────────────────────────────────────────────
 
+_sha = os.environ.get("RAILWAY_GIT_COMMIT_SHA", "")
+APP_VERSION = _sha[:7] if _sha else "dev"
+
+
 @app.route("/")
 def index():
-    return render_template("index.html")
+    return render_template("index.html", version=APP_VERSION)
 
 
 if __name__ == "__main__":
