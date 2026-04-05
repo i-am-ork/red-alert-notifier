@@ -25,9 +25,6 @@ from app import (
     AlertMonitor,
     OrefClient,
     _data_cache,
-    SIREN_CATEGORIES,
-    NON_EVENT_CATEGORIES,
-    ALL_CLEAR_PHRASES,
 )
 
 
@@ -113,7 +110,7 @@ class TestAlertIsAllClear:
         assert not AlertMonitor.alert_is_all_clear({"cat": "14", "title": "בדקות הקרובות"})
 
     def test_all_clear_phrases_each_recognised(self):
-        for phrase in ALL_CLEAR_PHRASES:
+        for phrase in AlertMonitor.ALL_CLEAR_PHRASES:
             assert AlertMonitor.alert_is_all_clear({"cat": "1", "title": phrase}), \
                 f"phrase '{phrase}' should be recognised as all-clear"
 
@@ -148,10 +145,10 @@ class TestAlertCat:
         assert AlertMonitor.alert_cat({"cat": None}) == 0
 
     def test_cat_14_in_non_event_set(self):
-        assert AlertMonitor.alert_cat({"cat": "14"}) in NON_EVENT_CATEGORIES
+        assert AlertMonitor.alert_cat({"cat": "14"}) in AlertMonitor.NON_EVENT_CATEGORIES
 
     def test_cat_1_in_siren_set(self):
-        assert AlertMonitor.alert_cat({"cat": "1"}) in SIREN_CATEGORIES
+        assert AlertMonitor.alert_cat({"cat": "1"}) in AlertMonitor.SIREN_CATEGORIES
 
     def test_float_string_invalid(self):
         assert AlertMonitor.alert_cat({"cat": "1.5"}) == 0

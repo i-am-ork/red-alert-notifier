@@ -12,37 +12,12 @@ Then open http://localhost:5000
 from flask import Flask, jsonify, render_template, request as flask_request
 import json
 import os
+import re
 import requests
 import threading
 import time
 from datetime import datetime
 import pytz
-
-# ── Timezone ────────────────────────────────────────────────────────────────
-IL_TZ = pytz.timezone("Asia/Jerusalem")
-
-
-def il_now() -> datetime:
-    return datetime.now(IL_TZ)
-
-
-# ── Constants ──────────────────────────────────────────────────────────────
-ALERT_POLL_SEC = 3
-HISTORY_POLL_SEC = 30
-
-# Words that indicate an "all-clear" / removal of alert in the history API
-# "האירוע הסתיים" = "The event has ended" — the standard Pikud HaOref all-clear title
-ALL_CLEAR_PHRASES = ["הסרת", "ניתן לצאת", "כיול ברור", "הכרזה על", "הסרה", "האירוע הסתיים", "הסתיים"]
-
-# Category numbers that represent actual incoming threats (not all-clear)
-SIREN_CATEGORIES = {1, 2, 3, 4, 5, 6, 7, 8, 9, 11}
-
-# Categories that are neither siren nor all-clear (e.g. pre-warning)
-# cat=14: "בדקות הקרובות צפויות להתקבל התרעות באזורך" (incoming warning expected)
-NON_EVENT_CATEGORIES = {14}
-
-DEFAULT_CITIES = ["חולון"]
-
 
 # ── Raw data cache (written by background thread, read per-request) ────────
 
@@ -86,6 +61,44 @@ class OrefClient:
     }
     _CURRENT_URL = "https://www.oref.org.il/WarningMessages/alert/alerts.json"
     _HISTORY_URL = "https://www.oref.org.il/warningMessages/alert/History/alertsHistory.json"
+    _CITIES_URL  = "https://alerts-history.oref.org.il/Shared/Ajax/GetCitiesMix.aspx?lang=he"
+
+    # ── City → area mapping ────────────────────────────────────────────────
+    _CITY_AREAS_FILE = os.path.join(os.path.dirname(__file__), "city_areas.json")
+    city_areas: dict[str, str] = {}
+
+    @classmethod
+    def _init_city_areas(cls) -> None:
+        """Load fallback city→area map from city_areas.json (called once at startup)."""
+        try:
+            with open(cls._CITY_AREAS_FILE, encoding="utf-8") as f:
+                cls.city_areas = json.load(f)
+            print(f"[city_areas] loaded {len(cls.city_areas)} fallback entries", flush=True)
+        except Exception as e:
+            print(f"[city_areas] could not load city_areas.json: {e}", flush=True)
+
+    @staticmethod
+    def get_area(city: str) -> str:
+        """Return the Pikud HaOref sub-area for a city name."""
+        if city in OrefClient.city_areas:
+            return OrefClient.city_areas[city]
+        prefix = city.split(" - ")[0].strip()
+        if prefix != city and prefix in OrefClient.city_areas:
+            return OrefClient.city_areas[prefix]
+        return "אזורים נוספים"
+
+    @classmethod
+    def load_city_areas_async(cls) -> None:
+        """Fetch the official city→area map from Pikud HaOref and merge into city_areas."""
+        def _run():
+            try:
+                dynamic = cls.get_city_areas()
+                if dynamic:
+                    cls.city_areas.update(dynamic)
+                    print(f"[oref cities] loaded {len(dynamic)} city→area mappings", flush=True)
+            except Exception as exc:
+                print(f"[oref cities] failed: {exc}", flush=True)
+        threading.Thread(target=_run, daemon=True, name="oref-cities").start()
 
     @staticmethod
     def get_current_alert() -> dict | None:
@@ -118,11 +131,53 @@ class OrefClient:
                 return data
         return []
 
+    @staticmethod
+    def get_city_areas() -> dict[str, str]:
+        """
+        Fetches the official Pikud HaOref city list and returns a mapping of
+        city name → sub-area name extracted from the 'mixname' field:
+            e.g.  'חולון' → 'גוש דן'
+        Returns an empty dict if the fetch fails (caller uses hardcoded fallback).
+        """
+        try:
+            r = requests.get(OrefClient._CITIES_URL, headers=OrefClient._HEADERS, timeout=10)
+            if r.status_code != 200:
+                return {}
+            cities = json.loads(r.content.decode("utf-8-sig"))
+            result = {}
+            for entry in cities:
+                name = entry.get("label_he") or entry.get("label", "")
+                mixname = entry.get("mixname", "")
+                m = re.search(r"<span>(.+?)</span>", mixname)
+                if name and m:
+                    result[name] = m.group(1)
+            return result
+        except Exception as exc:
+            print(f"[oref cities] {exc}")
+            return {}
+
 
 # ── Alert state machine ────────────────────────────────────────────────────
 
 class AlertMonitor:
     """Manages alert state, background polling, and city configuration."""
+
+    # ── Configuration ──────────────────────────────────────────────────────
+    ALERT_POLL_SEC = 3
+    HISTORY_POLL_SEC = 30
+    DEFAULT_CITIES = ["חולון"]
+    _TZ = pytz.timezone("Asia/Jerusalem")
+
+    @staticmethod
+    def now() -> datetime:
+        return datetime.now(AlertMonitor._TZ)
+
+    # Words that indicate an "all-clear" / removal of alert in the history API
+    ALL_CLEAR_PHRASES = ["הסרת", "ניתן לצאת", "כיול ברור", "הכרזה על", "הסרה", "האירוע הסתיים", "הסתיים"]
+    # Category numbers that represent actual incoming threats (not all-clear)
+    SIREN_CATEGORIES = {1, 2, 3, 4, 5, 6, 7, 8, 9, 11}
+    # cat=14: "בדקות הקרובות צפויות להתקבל התרעות באזורך" (incoming warning expected)
+    NON_EVENT_CATEGORIES = {14}
 
     def __init__(self, default_cities: list[str] | None = None):
         self._lock = threading.Lock()
@@ -132,7 +187,7 @@ class AlertMonitor:
         self.last_clear_time: str | None = None   # ISO string of last official all-clear
         self.last_api_check: str | None = None    # ISO string of last successful API call
         self.api_reachable: bool = True
-        self.watched_cities: set[str] = set(default_cities or DEFAULT_CITIES)
+        self.watched_cities: set[str] = set(default_cities or AlertMonitor.DEFAULT_CITIES)
 
     # ── Status helpers ─────────────────────────────────────────────────────
 
@@ -141,7 +196,7 @@ class AlertMonitor:
         old = self.status
         if old == new:
             return
-        ts = il_now().strftime("%H:%M:%S")
+        ts = AlertMonitor.now().strftime("%H:%M:%S")
         suffix = f"  [{reason}]" if reason else ""
         print(f"[status] {old} → {new}{suffix}  @ {ts}", flush=True)
         self.status = new
@@ -192,14 +247,14 @@ class AlertMonitor:
     @staticmethod
     def entry_is_all_clear(entry: dict) -> bool:
         title = entry.get("title", "")
-        return any(p in title for p in ALL_CLEAR_PHRASES) or entry.get("category", 0) == 13
+        return any(p in title for p in AlertMonitor.ALL_CLEAR_PHRASES) or entry.get("category", 0) == 13
 
     @staticmethod
     def alert_is_all_clear(alert: dict) -> bool:
         """Check if a real-time alert dict is actually an all-clear broadcast."""
         title = alert.get("title", "")
         cat = str(alert.get("cat", ""))
-        return cat == "13" or any(p in title for p in ALL_CLEAR_PHRASES)
+        return cat == "13" or any(p in title for p in AlertMonitor.ALL_CLEAR_PHRASES)
 
     @staticmethod
     def alert_cat(alert: dict) -> int:
@@ -223,7 +278,7 @@ class AlertMonitor:
         (new_siren_active, new_pre_active) for use in the next call.
         """
         with self._lock:
-            self.last_api_check = il_now().isoformat()
+            self.last_api_check = AlertMonitor.now().isoformat()
             self.api_reachable = api_ok
 
         siren_active = False
@@ -239,7 +294,7 @@ class AlertMonitor:
                     explicit_clear = True
                 else:
                     cat = self.alert_cat(alert)
-                    if cat in NON_EVENT_CATEGORIES:
+                    if cat in AlertMonitor.NON_EVENT_CATEGORIES:
                         pre_active = True
                     elif cat != 0:
                         siren_active = True
@@ -249,14 +304,14 @@ class AlertMonitor:
                 if siren_active:
                     if not prev_siren_active:
                         # Fresh alert — record siren time
-                        self.last_siren_time = il_now().isoformat()
+                        self.last_siren_time = AlertMonitor.now().isoformat()
                         self.last_clear_time = None
                     self._set_status("alert", "live api")
 
                 elif explicit_clear:
                     # Pikud HaOref sent an official clear broadcast
                     self._set_status("clear", "live api")
-                    self.last_clear_time = il_now().isoformat()
+                    self.last_clear_time = AlertMonitor.now().isoformat()
 
                 elif pre_active:
                     if self.status == "normal":
@@ -293,14 +348,14 @@ class AlertMonitor:
             if not self.entry_matches_watched(entry):
                 continue
             cat = entry.get("category", 0)
-            if cat in NON_EVENT_CATEGORIES:
+            if cat in AlertMonitor.NON_EVENT_CATEGORIES:
                 continue  # skip pre-warnings; they are neither siren nor all-clear
             if last_watched_event is None:
                 last_watched_event = entry
             if self.entry_is_all_clear(entry):
                 if last_watched_clear_date is None:
                     last_watched_clear_date = entry.get("alertDate")
-            elif entry.get("category", 0) in SIREN_CATEGORIES:
+            elif entry.get("category", 0) in AlertMonitor.SIREN_CATEGORIES:
                 if last_watched_siren_date is None:
                     last_watched_siren_date = entry.get("alertDate")
 
@@ -376,12 +431,12 @@ class AlertMonitor:
 
             # Also feed the stateless data cache used by the per-user API
             with self._lock:
-                ts = self.last_api_check or il_now().isoformat()
+                ts = self.last_api_check or AlertMonitor.now().isoformat()
             _data_cache.update_current(alert, api_ok, ts)
 
             # ── Poll history less frequently ───────────────────────────────
             now_t = time.monotonic()
-            if now_t - last_history_t >= HISTORY_POLL_SEC:
+            if now_t - last_history_t >= AlertMonitor.HISTORY_POLL_SEC:
                 last_history_t = now_t
                 try:
                     history = OrefClient.get_history()
@@ -392,13 +447,15 @@ class AlertMonitor:
                 except Exception as exc:
                     print(f"[oref history] {exc}")
 
-            time.sleep(ALERT_POLL_SEC)
+            time.sleep(AlertMonitor.ALERT_POLL_SEC)
 
 
 # ── Application setup ──────────────────────────────────────────────────────
 
-monitor = AlertMonitor(DEFAULT_CITIES)
+OrefClient._init_city_areas()
+monitor = AlertMonitor()
 monitor.start_polling()
+OrefClient.load_city_areas_async()
 
 app = Flask(__name__)
 
@@ -434,7 +491,7 @@ def api_status():
                 explicit_clear = True
             else:
                 cat = AlertMonitor.alert_cat(alert)
-                if cat in NON_EVENT_CATEGORIES:
+                if cat in AlertMonitor.NON_EVENT_CATEGORIES:
                     pre_active = True
                 elif cat != 0:
                     siren_active = True
@@ -449,14 +506,14 @@ def api_status():
         if not AlertMonitor.city_matches_watched(city, watched):
             continue
         cat = entry.get("category", 0)
-        if cat in NON_EVENT_CATEGORIES:
+        if cat in AlertMonitor.NON_EVENT_CATEGORIES:
             continue
         if last_watched_event is None:
             last_watched_event = entry
         if AlertMonitor.entry_is_all_clear(entry):
             if last_clear_time is None:
                 last_clear_time = entry.get("alertDate")
-        elif cat in SIREN_CATEGORIES:
+        elif cat in AlertMonitor.SIREN_CATEGORIES:
             if last_siren_time is None:
                 last_siren_time = entry.get("alertDate")
 
@@ -510,7 +567,7 @@ def api_test():
     """Simulate a siren for 5 seconds, then enter 'stay' state."""
     with monitor._lock:
         monitor._set_status("alert", "test")
-        monitor.last_test_time = il_now().isoformat()
+        monitor.last_test_time = AlertMonitor.now().isoformat()
         monitor.last_clear_time = None
 
     def _revert():
@@ -547,6 +604,51 @@ def api_reset():
     with monitor._lock:
         monitor._set_status("normal", "manual reset")
     return jsonify({"ok": True})
+
+
+@app.route("/api/events")
+def api_events():
+    """
+    National event overview (not per-user).
+    Returns all currently active areas grouped by status: alert, pre_alert, stay.
+    Uses the raw data cache so it is always non-user-specific.
+    """
+    alert, history, api_reachable, _ = _data_cache.snapshot()
+
+    SEVERITY: dict[str, int] = {"alert": 3, "pre_alert": 2, "stay": 1}
+    area_status: dict[str, str] = {}
+
+    def _set(area: str, status: str) -> None:
+        if SEVERITY.get(status, 0) > SEVERITY.get(area_status.get(area, ""), 0):
+            area_status[area] = status
+
+    # Live signal
+    if api_reachable and alert and not AlertMonitor.alert_is_all_clear(alert):
+        cat = AlertMonitor.alert_cat(alert)
+        if cat != 0:
+            st = "pre_alert" if cat in AlertMonitor.NON_EVENT_CATEGORIES else "alert"
+            for city in alert.get("data", []):
+                _set(OrefClient.get_area(city), st)
+
+    # History: most recent event per area → if it was a siren with no clear → stay
+    seen_areas: set[str] = set()
+    for entry in history:
+        area = OrefClient.get_area(entry.get("data", ""))
+        cat = entry.get("category", 0)
+        if cat in AlertMonitor.NON_EVENT_CATEGORIES or area in seen_areas:
+            continue
+        seen_areas.add(area)
+        if not AlertMonitor.entry_is_all_clear(entry) and cat in AlertMonitor.SIREN_CATEGORIES:
+            _set(area, "stay")
+
+    # Group by status
+    by_status: dict[str, list[str]] = {}
+    for area, status in area_status.items():
+        by_status.setdefault(status, []).append(area)
+    for s in by_status:
+        by_status[s].sort()
+
+    return jsonify(by_status)
 
 
 # ── HTML frontend ──────────────────────────────────────────────────────────

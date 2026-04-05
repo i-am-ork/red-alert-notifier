@@ -195,6 +195,29 @@
   #apiStatus { display: flex; align-items: center; gap: 5px; }
   .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--green); }
   .dot.err { background: var(--red); }
+
+  /* ── National events box ───────────────────────────────────────────────────── */
+  .event-group { margin-bottom: 10px; }
+  .event-group:last-child { margin-bottom: 0; }
+  .event-status-label {
+    font-size: 0.8rem;
+    font-weight: 700;
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    margin-bottom: 5px;
+  }
+  .event-areas { display: flex; flex-wrap: wrap; gap: 5px; }
+  .area-tag {
+    font-size: 0.75rem;
+    padding: 2px 9px;
+    border-radius: 20px;
+    border: 1px solid;
+    white-space: nowrap;
+  }
+  .area-alert { color: var(--red);    border-color: rgba(248,81,73,0.4);  background: rgba(248,81,73,0.08); }
+  .area-pre   { color: var(--yellow); border-color: rgba(240,192,64,0.4); background: rgba(240,192,64,0.08); }
+  .area-stay  { color: var(--orange); border-color: rgba(227,179,65,0.4); background: rgba(227,179,65,0.08); }
 </style>
 </head>
 <body>
@@ -248,6 +271,14 @@
       </button>
     </div>
     <div id="citiesFeedback" style="font-size:0.75rem;color:var(--muted);margin-top:5px;min-height:1em;"></div>
+  </div>
+
+  <!-- National events overview -->
+  <div class="card">
+    <div class="card-label">אירועים פעילים עכשיו בארץ</div>
+    <div id="eventsBody" style="margin-top:8px;min-height:1.4em;">
+      <span style="color:var(--muted);font-size:0.85rem;">טוען...</span>
+    </div>
   </div>
 
   <!-- Buttons -->
@@ -430,13 +461,41 @@ function saveCities() {
   poll();
 }
 
+// ── National events overview ─────────────────────────────────────────────────
+function updateEvents(data) {
+  const body = document.getElementById('eventsBody');
+  const ORDER = ['alert', 'pre_alert', 'stay'];
+  const INFO = {
+    alert:     { icon: '🚨', label: 'ירי רקטות פעיל',  cls: 'area-alert', color: 'var(--red)'    },
+    pre_alert: { icon: '⚠️', label: 'טרום-התרעה',       cls: 'area-pre',   color: 'var(--yellow)' },
+    stay:      { icon: '🔴', label: 'שהו במרחב המוגן',  cls: 'area-stay',  color: 'var(--orange)' },
+  };
+  const active = ORDER.filter(s => data[s] && data[s].length);
+  if (!active.length) {
+    body.innerHTML = '<span style="color:var(--green);font-size:0.85rem;">✅ כל הארץ שקטה — אין אירועים פעילים</span>';
+    return;
+  }
+  body.innerHTML = active.map(s => {
+    const { icon, label, cls, color } = INFO[s];
+    const tags = data[s].map(a => `<span class="area-tag ${cls}">${a}</span>`).join('');
+    return `<div class="event-group">
+      <div class="event-status-label" style="color:${color}">${icon} ${label}</div>
+      <div class="event-areas">${tags}</div>
+    </div>`;
+  }).join('');
+}
+
 // ── Poll backend ──────────────────────────────────────────────────────────
 async function poll() {
   const cities = getCitiesStr();
   const param = encodeURIComponent(cities);
   try {
-    const res = await fetch('/api/status?cities=' + param);
-    if (res.ok) updateUI(await res.json());
+    const [statusRes, eventsRes] = await Promise.all([
+      fetch('/api/status?cities=' + param),
+      fetch('/api/events')
+    ]);
+    if (statusRes.ok) updateUI(await statusRes.json());
+    if (eventsRes.ok) updateEvents(await eventsRes.json());
   } catch (e) {
     document.getElementById('apiDot').className = 'dot err';
   }
