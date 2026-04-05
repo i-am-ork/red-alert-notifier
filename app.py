@@ -630,16 +630,18 @@ def api_events():
             for city in alert.get("data", []):
                 _set(OrefClient.get_area(city), st)
 
-    # History: most recent event per area → if it was a siren with no clear → stay
-    seen_areas: set[str] = set()
+    # History: most recent event per CITY → if it was a siren with no clear → stay for that area.
+    # Tracking per-city (not area) prevents an all-clear for city A from masking an active
+    # siren for city B that happens to share the same area.
+    seen_cities: set[str] = set()
     for entry in history:
-        area = OrefClient.get_area(entry.get("data", ""))
+        city = entry.get("data", "")
         cat = entry.get("category", 0)
-        if cat in AlertMonitor.NON_EVENT_CATEGORIES or area in seen_areas:
+        if cat in AlertMonitor.NON_EVENT_CATEGORIES or city in seen_cities:
             continue
-        seen_areas.add(area)
+        seen_cities.add(city)
         if not AlertMonitor.entry_is_all_clear(entry) and cat in AlertMonitor.SIREN_CATEGORIES:
-            _set(area, "stay")
+            _set(OrefClient.get_area(city), "stay")
 
     # Group by status
     by_status: dict[str, list[str]] = {}

@@ -992,3 +992,79 @@ class TestMultiUser:
         d = cache_client.get("/api/status").get_json()
         assert d["status"] == monitor.status
         assert "watched_cities" in d
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# /api/events  —  national area-level overview
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class TestApiEvents:
+
+    def test_empty_when_no_history_and_no_alert(self, cache_client):
+        d = cache_client.get("/api/events").get_json()
+        assert d == {}
+
+    def test_stay_area_from_history(self, cache_client):
+        """An uncleared siren in history surfaces as 'stay' for that area."""
+        _data_cache.update_history([
+            make_history_entry("חולון", 1, "ירי רקטות"),
+        ])
+        d = cache_client.get("/api/events").get_json()
+        assert "stay" in d
+        assert any("גוש דן" in area or "חולון" in area for areas in d.values() for area in areas)
+
+    def test_all_clear_for_city_removes_area(self, cache_client):
+        """All-clear is the most-recent event for the city → area must NOT appear."""
+        _data_cache.update_history([
+            make_history_entry("חולון", 13, "האירוע הסתיים", "2026-04-03 12:05:00"),
+            make_history_entry("חולון", 1,  "ירי רקטות",    "2026-04-03 12:00:00"),
+        ])
+        d = cache_client.get("/api/events").get_json()
+        areas = [a for areas in d.values() for a in areas]
+        # The area that חולון belongs to should not appear at all
+        from app import OrefClient
+        holon_area = OrefClient.get_area("חולון")
+        assert holon_area not in areas
+
+    def test_clear_for_one_city_does_not_mask_siren_in_same_area(self, cache_client):
+        """
+        Regression: all-clear for city A must not suppress an active siren for
+        city B that shares the same area.  This was the seen_areas bug where
+        כפר גלעדי's all-clear masked drone events across the entire Galilee area.
+        """
+        from app import OrefClient
+        # Use two cities from the same area: pick any two that share one.
+        # We place them explicitly in OrefClient.city_areas for test isolation.
+        OrefClient.city_areas["עיר-א"] = "אזור-בדיקה"
+        OrefClient.city_areas["עיר-ב"] = "אזור-בדיקה"
+        try:
+            _data_cache.update_history([
+                # city A: all-clear (most recent for עיר-א)
+                make_history_entry("עיר-א", 13, "האירוע הסתיים", "2026-04-03 12:05:00"),
+                make_history_entry("עיר-א", 1,  "ירי רקטות",    "2026-04-03 12:00:00"),
+                # city B: siren, no clear
+                make_history_entry("עיר-ב", 1,  "ירי רקטות",    "2026-04-03 12:00:00"),
+            ])
+            d = cache_client.get("/api/events").get_json()
+            assert "stay" in d, "city B's area should be in stay"
+            assert "אזור-בדיקה" in d["stay"], "shared area must appear in stay due to city B"
+        finally:
+            OrefClient.city_areas.pop("עיר-א", None)
+            OrefClient.city_areas.pop("עיר-ב", None)
+
+    def test_live_alert_overrides_stay_to_alert(self, cache_client):
+        """A live siren from the cache elevates the area from stay → alert."""
+        from app import OrefClient
+        OrefClient.city_areas["עיר-ג"] = "אזור-חי"
+        try:
+            _data_cache.update_current(make_alert(["עיר-ג"], cat=1), True, "2026-04-03T12:00:00")
+            _data_cache.update_history([
+                make_history_entry("עיר-ג", 1, "ירי רקטות"),
+            ])
+            d = cache_client.get("/api/events").get_json()
+            assert "alert" in d
+            assert "אזור-חי" in d["alert"]
+            assert "אזור-חי" not in d.get("stay", [])
+        finally:
+            OrefClient.city_areas.pop("עיר-ג", None)
+            _data_cache.update_current(None, True, "2026-04-03T12:00:00")
