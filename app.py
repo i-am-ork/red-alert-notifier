@@ -60,8 +60,8 @@ class OrefClient:
         "User-Agent": "Mozilla/5.0 (compatible; HolonAlertsApp/1.0)",
     }
     _CURRENT_URL = "https://www.oref.org.il/WarningMessages/alert/alerts.json"
-    _HISTORY_URL     = "https://www.oref.org.il/warningMessages/alert/History/alertsHistory.json"
-    _HISTORY_URL_ALT = "https://alerts-history.oref.org.il/Shared/Ajax/GetAlarmsHistory.aspx?lang=he&mode=0"
+    _HISTORY_URL     = "https://alerts-history.oref.org.il/Shared/Ajax/GetAlarmsHistory.aspx?lang=he&mode=0"
+    _HISTORY_URL_ALT = "https://www.oref.org.il/warningMessages/alert/History/alertsHistory.json"
     _CITIES_URL  = "https://alerts-history.oref.org.il/Shared/Ajax/GetCitiesMix.aspx?lang=he"
 
     # ── City → area mapping ────────────────────────────────────────────────
