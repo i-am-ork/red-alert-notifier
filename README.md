@@ -15,6 +15,12 @@ Real-time Israeli rocket alert monitor powered by [Pikud HaOref](https://www.ore
 
 ## Running locally
 
+With Docker (runs tests then starts the app):
+```bash
+docker compose up -d --build
+```
+
+Without Docker:
 ```bash
 ./run.sh           # starts on port 5000
 ./run.sh 8080      # custom port
