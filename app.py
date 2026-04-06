@@ -677,11 +677,12 @@ def api_events():
 
 _sha = os.environ.get("RAILWAY_GIT_COMMIT_SHA", "")
 APP_VERSION = _sha[:7] if _sha else "dev"
+_start_time = AlertMonitor.now()
 
 
 @app.route("/")
 def index():
-    return render_template("index.html", version=APP_VERSION)
+    return render_template("index.html", version=APP_VERSION, start_time=_start_time.isoformat())
 
 
 if __name__ == "__main__":

@@ -296,7 +296,7 @@
     </div>
     <div style="display:flex;gap:12px;align-items:center;">
       <div id="lastUpdate"></div>
-      <span style="opacity:0.4;font-size:0.68rem;">{{ version }}</span>
+      <span style="opacity:0.4;font-size:0.68rem;">{{ version }} &nbsp;·&nbsp; <span id="uptimeVal">—</span></span>
     </div>
   </div>
 
@@ -323,12 +323,20 @@ function updateTitle(citiesStr) {
   updateTitle(saved);
 })();
 
-// ── Clock ──────────────────────────────────────────────────────────────────
+// ── Clock + Uptime ────────────────────────────────────────────────────────
+const _containerStart = new Date("{{ start_time }}");
+
 function tick() {
   const now = new Date();
   const pad = n => String(n).padStart(2, '0');
   document.getElementById('clock').textContent =
     `${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(now.getSeconds())}`;
+  const secs = Math.floor((now - _containerStart) / 1000);
+  const uh = Math.floor(secs / 3600);
+  const um = Math.floor((secs % 3600) / 60);
+  const us = secs % 60;
+  document.getElementById('uptimeVal').textContent =
+    `uptime ${pad(uh)}:${pad(um)}:${pad(us)}`;
 }
 setInterval(tick, 1000);
 tick();
