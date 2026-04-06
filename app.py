@@ -60,7 +60,8 @@ class OrefClient:
         "User-Agent": "Mozilla/5.0 (compatible; HolonAlertsApp/1.0)",
     }
     _CURRENT_URL = "https://www.oref.org.il/WarningMessages/alert/alerts.json"
-    _HISTORY_URL = "https://www.oref.org.il/warningMessages/alert/History/alertsHistory.json"
+    _HISTORY_URL     = "https://www.oref.org.il/warningMessages/alert/History/alertsHistory.json"
+    _HISTORY_URL_ALT = "https://alerts-history.oref.org.il/Shared/Ajax/GetAlarmsHistory.aspx?lang=he&mode=0"
     _CITIES_URL  = "https://alerts-history.oref.org.il/Shared/Ajax/GetCitiesMix.aspx?lang=he"
 
     # ── City → area mapping ────────────────────────────────────────────────
@@ -123,12 +124,18 @@ class OrefClient:
         Returns recent alert history entries (newest first).
         Each entry: {"alertDate": "...", "title": "...", "data": "<city>", "category": N}
         Note: each entry contains a single city in 'data' (not a list).
+        Falls back to alerts-history.oref.org.il if the primary URL returns empty
+        (the primary URL is sometimes geo-blocked for non-Israeli servers).
         """
-        r = requests.get(OrefClient._HISTORY_URL, headers=OrefClient._HEADERS, timeout=10)
-        if r.status_code == 200 and r.content.strip():
-            data = json.loads(r.content.decode("utf-8-sig"))
-            if isinstance(data, list):
-                return data
+        for url in (OrefClient._HISTORY_URL, OrefClient._HISTORY_URL_ALT):
+            try:
+                r = requests.get(url, headers=OrefClient._HEADERS, timeout=10)
+                if r.status_code == 200 and r.content.strip():
+                    data = json.loads(r.content.decode("utf-8-sig"))
+                    if isinstance(data, list) and data:
+                        return data
+            except Exception as exc:
+                print(f"[oref history] {url}: {exc}", flush=True)
         return []
 
     @staticmethod
