@@ -247,8 +247,6 @@
   <div class="card">
     <div class="card-label">צבע אדום אחרון — אמיתי</div>
     <div id="lastSirenVal" class="card-value">—</div>
-    <div class="card-label" style="margin-top:12px;">צבע אדום אחרון — בדיקה</div>
-    <div id="lastTestVal" class="card-value" style="color:var(--orange);">—</div>
     <div class="card-label" style="margin-top:12px;">הכל בסדר החל מ</div>
     <div id="lastClearVal" class="card-value" style="color:var(--green);">—</div>
   </div>
@@ -428,7 +426,6 @@ function updateUI(data) {
 
   // Last siren
   document.getElementById('lastSirenVal').textContent = fmt(data.last_siren_time);
-  document.getElementById('lastTestVal').textContent  = fmt(data.last_test_time);
   const clearEl = document.getElementById('lastClearVal');
   if (data.last_clear_time) {
     clearEl.textContent = fmt(data.last_clear_time);

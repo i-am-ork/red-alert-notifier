@@ -422,6 +422,7 @@ class AlertMonitor:
         prev_siren_active = False
         prev_pre_active = False
         last_history_t = 0.0
+        _last_logged_alert: dict | None = None
 
         while True:
             alert = None
@@ -431,6 +432,14 @@ class AlertMonitor:
                 api_ok = True
             except Exception as exc:
                 print(f"[oref current] {exc}")
+
+            # Log every new distinct alert (helps diagnose pre-siren category)
+            if alert != _last_logged_alert:
+                _last_logged_alert = alert
+                if alert:
+                    print(f"[alert] {json.dumps(alert, ensure_ascii=False)}", flush=True)
+                else:
+                    print("[alert] cleared", flush=True)
 
             prev_siren_active, prev_pre_active = self.do_alert_tick(
                 alert, api_ok, prev_siren_active, prev_pre_active
