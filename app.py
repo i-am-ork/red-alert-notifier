@@ -454,6 +454,19 @@ class AlertMonitor:
 
 OrefClient._init_city_areas()
 monitor = AlertMonitor()
+
+# Eagerly fetch history before Flask starts serving so that on startup the
+# server already knows about any unacknowledged sirens or all-clears, instead
+# of showing "normal" for up to 30 seconds after a cold start / redeploy.
+try:
+    _startup_history = OrefClient.get_history()
+    if _startup_history:
+        monitor.process_history(_startup_history)
+        _data_cache.update_history(_startup_history)
+        print(f"[startup] loaded {len(_startup_history)} history entries", flush=True)
+except Exception as _startup_exc:
+    print(f"[startup] history prefetch failed: {_startup_exc}", flush=True)
+
 monitor.start_polling()
 OrefClient.load_city_areas_async()
 

@@ -1006,12 +1006,17 @@ class TestApiEvents:
 
     def test_stay_area_from_history(self, cache_client):
         """An uncleared siren in history surfaces as 'stay' for that area."""
-        _data_cache.update_history([
-            make_history_entry("חולון", 1, "ירי רקטות"),
-        ])
-        d = cache_client.get("/api/events").get_json()
-        assert "stay" in d
-        assert any("גוש דן" in area or "חולון" in area for areas in d.values() for area in areas)
+        from app import OrefClient
+        OrefClient.city_areas["עיר-בדיקה"] = "אזור-בדיקה-stay"
+        try:
+            _data_cache.update_history([
+                make_history_entry("עיר-בדיקה", 1, "ירי רקטות"),
+            ])
+            d = cache_client.get("/api/events").get_json()
+            assert "stay" in d
+            assert "אזור-בדיקה-stay" in d["stay"]
+        finally:
+            OrefClient.city_areas.pop("עיר-בדיקה", None)
 
     def test_all_clear_for_city_removes_area(self, cache_client):
         """All-clear is the most-recent event for the city → area must NOT appear."""
