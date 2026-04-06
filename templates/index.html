@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>מצב התרעות</title>
 <style>
+  html { font-size: 125%; }
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
   :root {
@@ -26,47 +27,90 @@
     background: var(--bg);
     color: var(--text);
     min-height: 100vh;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    padding: 20px;
+    padding: 0;
     direction: rtl;
   }
 
   .wrapper {
     width: 100%;
-    max-width: 520px;
+    min-height: 100vh;
+    padding: 24px 40px;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+  }
+
+  .page-header {
+    text-align: center;
+  }
+  .page-header .card { margin-bottom: 0; min-width: 200px; text-align: center; }
+
+  .main-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+    align-items: stretch;
+    flex: 1;
+  }
+
+  .left-col, .right-col {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
   }
 
   h1 {
-    text-align: center;
-    font-size: 1.5rem;
+    font-size: 1.8rem;
     font-weight: 700;
-    margin-bottom: 24px;
     color: var(--text);
     letter-spacing: 0.02em;
+    text-align: center;
   }
   h1 span { color: var(--red); }
 
-  /* ── Clock card ──────────────────────────────────────────────────────── */
+  /* ── Cards ──────────────────────────────────────────────────────────── */
   .card {
     background: var(--card);
     border: 1px solid var(--border);
     border-radius: 12px;
-    padding: 18px 22px;
-    margin-bottom: 14px;
+    padding: 20px 24px;
+    margin-bottom: 0;
   }
   .card-label {
-    font-size: 0.75rem;
+    font-size: 0.68rem;
     color: var(--muted);
     margin-bottom: 6px;
     text-transform: uppercase;
-    letter-spacing: 0.06em;
+    letter-spacing: 0.1em;
   }
   .card-value {
-    font-size: 1.2rem;
-    font-weight: 600;
+    font-size: 1.35rem;
+    font-weight: 700;
+  }
+
+  /* ── Stat row (two side-by-side stats in one card) ───────────────────── */
+  .stat-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0;
+  }
+  .stat-cell {
+    padding: 18px 20px;
+  }
+  .stat-cell + .stat-cell {
+    border-right: 1px solid var(--border);
+  }
+  .stat-label {
+    font-size: 0.65rem;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    margin-bottom: 8px;
+  }
+  .stat-value {
+    font-size: 1.1rem;
+    font-weight: 700;
+    line-height: 1.3;
   }
   #clock {
     font-size: 2.8rem;
@@ -79,19 +123,19 @@
 
   /* ── Traffic light ─────────────────────────────────────────────────── */
   .traffic-light {
-    display: inline-flex;
+    display: flex;
     flex-direction: column;
     align-items: center;
     gap: 8px;
     background: #111;
-    border: 3px solid #2a2a2a;
+    border: 2px solid #2a2a2a;
     border-radius: 16px;
-    padding: 12px 10px;
-    margin-bottom: 14px;
+    padding: 10px 10px;
+    flex-shrink: 0;
   }
   .tl-bulb {
-    width: 34px;
-    height: 34px;
+    width: 32px;
+    height: 32px;
     border-radius: 50%;
     background: #222;
     transition: background 0.3s, box-shadow 0.3s;
@@ -108,13 +152,18 @@
   /* ── Status card ─────────────────────────────────────────────────────── */
   #statusCard {
     border-radius: 14px;
-    padding: 28px 22px;
-    margin-bottom: 14px;
+    padding: 28px 24px;
     text-align: center;
     border: 2px solid var(--border);
     transition: border-color 0.3s, background 0.3s;
     background: var(--card);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    height: 100%;
   }
+  .status-body { display: contents; }
   #statusCard.s-pre {
     background: rgba(240,192,64,0.1);
     border-color: var(--yellow);
@@ -143,8 +192,9 @@
     50%      { border-color: rgba(240,192,64,0.4); box-shadow: 0 0 14px 3px rgba(240,192,64,0.2); }
   }
 
-  .status-icon  { font-size: 3.2rem; margin-bottom: 10px; line-height: 1; }
-  .status-main  { font-size: 1.45rem; font-weight: 700; line-height: 1.3; }
+  .traffic-light { margin-bottom: 12px; }
+  .status-icon  { font-size: 2.8rem; margin-bottom: 8px; line-height: 1; }
+  .status-main  { font-size: 1.5rem; font-weight: 700; line-height: 1.3; }
   .status-sub   { font-size: 0.85rem; color: var(--muted); margin-top: 8px; }
 
   .c-normal { color: var(--text); }
@@ -223,67 +273,103 @@
 <body>
 <div class="wrapper">
 
-  <h1>🚨 מצב <span>צבע אדום</span> — <span id="titleCities">...</span></h1>
+  <!-- Header: title -->
+  <div class="page-header">
+    <h1>🚨 מצב <span>צבע אדום</span> — <span id="titleCities">...</span></h1>
+  </div>
 
-  <!-- Clock -->
-  <div class="card">
-    <div class="card-label">שעה נוכחית</div>
+  <!-- Clock: full width -->
+  <div class="card" style="text-align:center;padding:16px 24px;">
     <div id="clock">--:--:--</div>
   </div>
 
-  <!-- Status -->
-  <div id="statusCard">
-    <div class="traffic-light">
-      <div class="tl-bulb" id="tl-red"></div>
-      <div class="tl-bulb" id="tl-yellow"></div>
-      <div class="tl-bulb" id="tl-green"></div>
+  <!-- Main grid -->
+  <div class="main-grid">
+
+    <!-- Left: details -->
+    <div class="left-col">
+
+      <!-- Siren / Clear timestamps -->
+      <div class="card" style="padding:0;overflow:hidden;">
+        <div class="stat-grid">
+          <div class="stat-cell">
+            <div class="stat-label">🔴 צבע אדום אחרון</div>
+            <div id="lastSirenVal" class="stat-value" style="color:var(--blue)">—</div>
+          </div>
+          <div class="stat-cell">
+            <div class="stat-label">🟢 הכל בסדר החל מ</div>
+            <div id="lastClearVal" class="stat-value" style="color:var(--green)">—</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- National events overview -->
+      <div class="card" style="flex:1;display:flex;flex-direction:column;">
+        <div class="card-label">אירועים פעילים עכשיו בארץ</div>
+        <div id="eventsBody" style="margin-top:8px;flex:1;overflow-y:auto;">
+          <span style="color:var(--muted);font-size:0.85rem;">טוען...</span>
+        </div>
+      </div>
+
+      <!-- Cities config -->
+      <div class="card">
+        <div class="card-label">ערים במעקב (מופרדות בפסיק)</div>
+        <div style="display:flex;gap:8px;margin-top:6px;align-items:center;">
+          <input id="citiesInput" type="text" dir="rtl"
+            style="flex:1;background:#0d1117;border:1px solid var(--border);border-radius:8px;
+                   padding:10px 12px;color:var(--text);font-size:1rem;font-family:inherit;outline:none;"
+            placeholder="חולון, בת ים, ראשון לציון"
+            onfocus="this.style.borderColor='var(--blue)'"
+            onblur="this.style.borderColor='var(--border)'"
+            onkeydown="if(event.key==='Enter')saveCities()" />
+          <button onclick="saveCities()"
+            style="flex:none;padding:10px 16px;background:var(--blue);color:#000;border-radius:8px;
+                   border:none;font-weight:700;font-family:inherit;cursor:pointer;font-size:0.9rem;">
+            שמור
+          </button>
+        </div>
+        <div id="citiesFeedback" style="font-size:0.75rem;color:var(--muted);margin-top:5px;min-height:1em;"></div>
+      </div>
+
+      <!-- Buttons -->
+      <div class="btn-row" style="margin-top:0;">
+        <button id="testBtn"    onclick="runTest()">🔔 בדיקת התרעה</button>
+        <button id="testPreBtn" onclick="runTestPre()">⚠️ טרום-התרעה</button>
+        <button id="resetBtn"   onclick="runReset()">↺ אפס</button>
+      </div>
+
     </div>
-    <div id="statusIcon" class="status-icon">⏳</div>
-    <div id="statusMain" class="status-main c-normal">טוען...</div>
-    <div id="statusSub"  class="status-sub"></div>
-  </div>
 
-  <!-- Last siren -->
-  <div class="card">
-    <div class="card-label">צבע אדום אחרון — אמיתי</div>
-    <div id="lastSirenVal" class="card-value">—</div>
-    <div class="card-label" style="margin-top:12px;">הכל בסדר החל מ</div>
-    <div id="lastClearVal" class="card-value" style="color:var(--green);">—</div>
-  </div>
-
-  <!-- Cities config -->
-  <div class="card">
-    <div class="card-label">ערים במעקב (מופרדות בפסיק)</div>
-    <div style="display:flex;gap:8px;margin-top:6px;align-items:center;">
-      <input id="citiesInput" type="text" dir="rtl"
-        style="flex:1;background:#0d1117;border:1px solid var(--border);border-radius:8px;
-               padding:10px 12px;color:var(--text);font-size:1rem;font-family:inherit;outline:none;"
-        placeholder="חולון, בת ים, ראשון לציון"
-        onfocus="this.style.borderColor='var(--blue)'"
-        onblur="this.style.borderColor='var(--border)'"
-        onkeydown="if(event.key==='Enter')saveCities()" />
-      <button onclick="saveCities()"
-        style="flex:none;padding:10px 16px;background:var(--blue);color:#000;border-radius:8px;
-               border:none;font-weight:700;font-family:inherit;cursor:pointer;font-size:0.9rem;">
-        שמור
-      </button>
+    <!-- Right: status -->
+    <div class="right-col">
+      <div id="statusCard">
+        <div class="traffic-light">
+          <div class="tl-bulb" id="tl-red"></div>
+          <div class="tl-bulb" id="tl-yellow"></div>
+          <div class="tl-bulb" id="tl-green"></div>
+        </div>
+        <div class="status-body">
+          <div id="statusIcon" class="status-icon">⏳</div>
+          <div id="statusMain" class="status-main c-normal">טוען...</div>
+          <div id="statusSub"  class="status-sub"></div>
+        </div>
+      </div>
     </div>
-    <div id="citiesFeedback" style="font-size:0.75rem;color:var(--muted);margin-top:5px;min-height:1em;"></div>
+
   </div>
 
-  <!-- National events overview -->
-  <div class="card">
-    <div class="card-label">אירועים פעילים עכשיו בארץ</div>
-    <div id="eventsBody" style="margin-top:8px;min-height:1.4em;">
-      <span style="color:var(--muted);font-size:0.85rem;">טוען...</span>
+  <!-- Timeline -->
+  <div class="card" id="timelineCard" style="padding:20px 24px;">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+      <div class="card-label" style="margin-bottom:0;">ציר זמן התרעות — 24 שעות אחרונות</div>
+      <div id="timelineLegend" style="display:flex;gap:14px;font-size:0.7rem;color:var(--muted);">
+        <span><span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:var(--red);margin-left:4px;"></span>ירי רקטות</span>
+        <span><span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:var(--yellow);margin-left:4px;"></span>טרום-התרעה</span>
+        <span><span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:var(--green);margin-left:4px;"></span>הסרה</span>
+      </div>
     </div>
-  </div>
-
-  <!-- Buttons -->
-  <div class="btn-row">
-    <button id="testBtn"    onclick="runTest()">🔔 בדיקת התרעה</button>
-    <button id="testPreBtn" onclick="runTestPre()">⚠️ בדיקת טרום-התרעה</button>
-    <button id="resetBtn"   onclick="runReset()">↺ אפס מצב</button>
+    <canvas id="timelineCanvas" style="width:100%;display:block;"></canvas>
+    <div id="timelineEmpty" style="text-align:center;color:var(--muted);font-size:0.85rem;padding:20px 0;display:none;">אין התרעות בשעות האחרונות</div>
   </div>
 
   <!-- Footer -->
@@ -477,7 +563,12 @@ function updateEvents(data) {
   };
   const active = ORDER.filter(s => data[s] && data[s].length);
   if (!active.length) {
-    body.innerHTML = '<span style="color:var(--green);font-size:0.85rem;">✅ כל הארץ שקטה — אין אירועים פעילים</span>';
+    body.innerHTML = `<div style="display:flex;flex-direction:column;align-items:center;justify-content:center;
+        height:100%;min-height:160px;gap:14px;opacity:0.85;">
+      <div style="font-size:3.5rem;line-height:1;">🟢</div>
+      <div style="color:var(--green);font-size:1.25rem;font-weight:700;">כל הארץ שקטה</div>
+      <div style="color:var(--muted);font-size:0.85rem;">אין אירועים פעילים</div>
+    </div>`;
     return;
   }
   body.innerHTML = active.map(s => {
@@ -507,6 +598,209 @@ async function poll() {
 }
 setInterval(poll, 3000);
 poll();
+
+// ── Timeline ──────────────────────────────────────────────────────────────
+const SIREN_CATS = new Set([1,2,3,4,5,6,7,8,9,11]);
+const PRE_CATS   = new Set([14]);
+
+function entryColor(e) {
+  if (e.is_clear) return '#3fb950';       // green
+  if (PRE_CATS.has(e.category)) return '#f0c040';  // yellow
+  if (SIREN_CATS.has(e.category)) return '#f85149'; // red
+  return '#8b949e';                        // muted (unknown)
+}
+
+async function drawTimeline() {
+  const canvas = document.getElementById('timelineCanvas');
+  const empty  = document.getElementById('timelineEmpty');
+  if (!canvas) return;
+
+  const cities = getCitiesStr();
+  const param  = encodeURIComponent(cities);
+  let entries;
+  try {
+    const r = await fetch('/api/history?cities=' + param);
+    entries = await r.json();
+  } catch { return; }
+
+  if (!entries.length) {
+    canvas.style.display = 'none';
+    empty.style.display  = '';
+    return;
+  }
+  canvas.style.display = '';
+  empty.style.display  = 'none';
+
+  const DPR    = window.devicePixelRatio || 1;
+  const W      = canvas.parentElement.clientWidth - 48; // card padding
+  const TRACK_H = 70;
+  const AXIS_H  = 20;
+  const LABEL_H = 48;  // two rows of labels above track
+  const PAD_TOP = 6;
+  const H       = LABEL_H + TRACK_H + AXIS_H + PAD_TOP * 2;
+
+  canvas.width  = W * DPR;
+  canvas.height = H * DPR;
+  canvas.style.width  = W + 'px';
+  canvas.style.height = H + 'px';
+
+  const ctx = canvas.getContext('2d');
+  ctx.scale(DPR, DPR);
+
+  const TRACK_Y = PAD_TOP + LABEL_H;  // track starts below label row
+
+  // Auto-scale: find first and last event timestamp, add 5-min padding each side
+  function parseMs(isoStr) {
+    const parts = isoStr.replace('T', ' ').split(/[- :]/);
+    return new Date(+parts[0], +parts[1]-1, +parts[2], +parts[3]||0, +parts[4]||0, +parts[5]||0).getTime();
+  }
+  const PAD_MS = 10 * 60 * 1000; // 10 min padding
+  const allMs  = entries.map(e => parseMs(e.time));
+  const start  = Math.min(...allMs) - PAD_MS;
+  const end    = Math.max(...allMs) + PAD_MS;
+  const span   = end - start;
+
+  function xOf(isoStr) {
+    return Math.max(0, Math.min(W, ((parseMs(isoStr) - start) / span) * W));
+  }
+
+  // Background track
+  ctx.fillStyle = '#0d1117';
+  ctx.beginPath();
+  ctx.roundRect(0, TRACK_Y, W, TRACK_H, 6);
+  ctx.fill();
+
+  // Grid lines: pick sensible interval based on span
+  const spanMin = span / 60000;
+  const gridIntervalMin = spanMin <= 60 ? 5 : spanMin <= 180 ? 15 : spanMin <= 360 ? 30 : 60;
+  ctx.strokeStyle = '#30363d';
+  ctx.lineWidth   = 1;
+  // align to clock boundary
+  const startDate = new Date(start);
+  const firstGrid = new Date(startDate);
+  firstGrid.setMinutes(Math.ceil(firstGrid.getMinutes() / gridIntervalMin) * gridIntervalMin, 0, 0);
+  for (let t = firstGrid.getTime(); t <= end; t += gridIntervalMin * 60000) {
+    const x = ((t - start) / span) * W;
+    ctx.beginPath();
+    ctx.moveTo(x, TRACK_Y);
+    ctx.lineTo(x, TRACK_Y + TRACK_H);
+    ctx.stroke();
+  }
+
+  // Tooltip data
+  const hits = [];
+
+  // Draw one bar per entry (oldest → newest so newer draws on top)
+  const sorted = [...entries].sort((a,b) => a.time.localeCompare(b.time));
+  for (const e of sorted) {
+    const x = xOf(e.time);
+    const w = Math.max(4, W / (24 * 60 / 5)); // ≈ 5-min width
+    const color = entryColor(e);
+    ctx.globalAlpha = 0.9;
+    ctx.fillStyle   = color;
+    ctx.beginPath();
+    ctx.roundRect(x - w/2, TRACK_Y + 3, w, TRACK_H - 6, 3);
+    ctx.fill();
+    ctx.globalAlpha = 1;
+    hits.push({ x, w, entry: e });
+  }
+
+  // Per-event time labels above the track — two staggered rows to avoid overlap
+  const FONT_SIZE = 11;
+  ctx.font        = `bold ${FONT_SIZE}px 'Segoe UI', Arial, sans-serif`;
+  ctx.textAlign   = 'center';
+  ctx.textBaseline = 'middle';
+  const PILL_H   = FONT_SIZE + 6;
+  const PILL_PAD = 5;
+  const ROW_Y    = [PAD_TOP + PILL_H / 2 + 2, PAD_TOP + PILL_H / 2 + 2 + PILL_H + 4]; // two rows
+  const rowSlots = [[], []];  // placed [x, pillW] per row
+
+  for (const e of sorted) {
+    const x = xOf(e.time);
+    // Fix time extraction: handle ISO "2026-04-06T16:10:00" format
+    const timePart = (e.time.split('T')[1] || e.time.split(' ')[1] || '').slice(0, 5)
+                  || e.time.slice(11, 16);
+    const textW = ctx.measureText(timePart).width;
+    const pillW = textW + PILL_PAD * 2;
+    const color = entryColor(e);
+
+    // Try row 0 first, then row 1; skip if both are full
+    let rowIdx = -1;
+    for (let r = 0; r < 2; r++) {
+      if (!rowSlots[r].some(([lx, lw]) => Math.abs(x - lx) < (lw / 2 + pillW / 2 + 3))) {
+        rowIdx = r; break;
+      }
+    }
+    if (rowIdx === -1) continue;
+    rowSlots[rowIdx].push([x, pillW]);
+
+    const labelCY = ROW_Y[rowIdx];
+
+    // tick line from this row's pill bottom to top of track
+    ctx.strokeStyle = color;
+    ctx.globalAlpha = 0.6;
+    ctx.lineWidth   = 1.5;
+    ctx.beginPath();
+    ctx.moveTo(x, TRACK_Y);
+    ctx.lineTo(x, labelCY + PILL_H / 2 + 1);
+    ctx.stroke();
+    ctx.globalAlpha = 1;
+
+    // pill background
+    ctx.fillStyle = color;
+    ctx.beginPath();
+    ctx.roundRect(x - pillW / 2, labelCY - PILL_H / 2, pillW, PILL_H, 4);
+    ctx.fill();
+
+    // label text
+    ctx.fillStyle = (color === '#f0c040') ? '#000' : '#fff';
+    ctx.fillText(timePart, x, labelCY);
+  }
+
+  // Axis labels aligned to grid intervals
+  ctx.fillStyle    = '#8b949e';
+  ctx.font         = `${11}px 'Segoe UI', Arial, sans-serif`;
+  ctx.textAlign    = 'center';
+  ctx.textBaseline = 'top';
+  const TZ = 'Asia/Jerusalem';
+  for (let t = firstGrid.getTime(); t <= end; t += gridIntervalMin * 60000) {
+    const lbl = new Date(t).toLocaleTimeString('he-IL', { hour:'2-digit', minute:'2-digit', timeZone: TZ });
+    const x   = ((t - start) / span) * W;
+    ctx.fillText(lbl, x, TRACK_Y + TRACK_H + 3);
+  }
+
+  // Tooltip on hover
+  canvas._hits = hits;
+}
+
+(function setupTimelineTooltip() {
+  const canvas  = document.getElementById('timelineCanvas');
+  const tooltip = document.createElement('div');
+  tooltip.style.cssText = 'position:fixed;background:#1c2333;border:1px solid #30363d;border-radius:8px;' +
+    'padding:8px 12px;font-size:0.78rem;color:#e6edf3;pointer-events:none;display:none;' +
+    'z-index:9999;max-width:220px;line-height:1.5;direction:rtl;';
+  document.body.appendChild(tooltip);
+
+  document.addEventListener('mousemove', ev => {
+    if (!canvas._hits) return;
+    const rect = canvas.getBoundingClientRect();
+    const mx   = ev.clientX - rect.left;
+    const my   = ev.clientY - rect.top;
+    if (my < 0 || my > rect.height) { tooltip.style.display='none'; return; }
+    const hit = canvas._hits.find(h => Math.abs(mx - h.x) <= Math.max(h.w/2 + 2, 6));
+    if (!hit) { tooltip.style.display='none'; return; }
+    const e    = hit.entry;
+    const time = e.time.split(' ')[1] || e.time;
+    tooltip.innerHTML = `<b>${e.city}</b><br>${e.title}<br><span style="color:#8b949e">${time}</span>`;
+    tooltip.style.display = '';
+    tooltip.style.left    = (ev.clientX + 12) + 'px';
+    tooltip.style.top     = (ev.clientY - 10) + 'px';
+  });
+  canvas.addEventListener('mouseleave', () => tooltip.style.display='none');
+})();
+
+drawTimeline();
+setInterval(drawTimeline, 60000);  // refresh every minute
 
 // ── Client-side test simulation (no server calls — per-user) ─────────────
 let _testOverride = null;   // { status, last_siren_time, last_clear_time } | null

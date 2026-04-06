@@ -682,6 +682,32 @@ def api_events():
     return jsonify(by_status)
 
 
+@app.route("/api/history")
+def api_history():
+    """
+    Returns alert history entries for the last 24 h, optionally filtered to watched cities.
+    Each entry: {time, city, title, category, is_clear}
+    """
+    cities_param = flask_request.args.get("cities", "")
+    watched = {c.strip() for c in cities_param.split(",") if c.strip()} if cities_param else None
+    _, history, _, _ = _data_cache.snapshot()
+    entries = []
+    for entry in history:
+        city = entry.get("data", "")
+        if watched and not AlertMonitor.city_matches_watched(city, watched):
+            continue
+        cat = entry.get("category", 0)
+        is_clear = AlertMonitor.entry_is_all_clear(entry)
+        entries.append({
+            "time": entry.get("alertDate", ""),
+            "city": city,
+            "title": entry.get("title", ""),
+            "category": cat,
+            "is_clear": is_clear,
+        })
+    return jsonify(entries)
+
+
 # ── HTML frontend ──────────────────────────────────────────────────────────
 
 _sha = os.environ.get("RAILWAY_GIT_COMMIT_SHA", "")
