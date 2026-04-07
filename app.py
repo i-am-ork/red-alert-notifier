@@ -181,6 +181,8 @@ class AlertMonitor:
 
     # Words that indicate an "all-clear" / removal of alert in the history API
     ALL_CLEAR_PHRASES = ["הסרת", "ניתן לצאת", "כיול ברור", "הכרזה על", "הסרה", "האירוע הסתיים", "הסתיים"]
+    # Title phrases that indicate a pre-alert (incoming alerts expected) in the live API
+    PRE_ALERT_PHRASES = ["בדקות הקרובות", "טרום התרעה", "צפויות להתקבל"]
     # Category numbers that represent actual incoming threats (not all-clear)
     SIREN_CATEGORIES = {1, 2, 3, 4, 5, 6, 7, 8, 9, 11}
     # cat=14: "בדקות הקרובות צפויות להתקבל התרעות באזורך" (incoming warning expected)
@@ -264,6 +266,14 @@ class AlertMonitor:
         return cat == "13" or any(p in title for p in AlertMonitor.ALL_CLEAR_PHRASES)
 
     @staticmethod
+    def alert_is_pre_alert(alert: dict) -> bool:
+        """Check if a real-time alert dict is a pre-alert (incoming alerts expected soon).
+        The live API uses cat=10 with a specific title phrase for this, not cat=14.
+        """
+        title = alert.get("title", "")
+        return any(p in title for p in AlertMonitor.PRE_ALERT_PHRASES)
+
+    @staticmethod
     def alert_cat(alert: dict) -> int:
         """Return the integer category of an alert, or 0 on error."""
         try:
@@ -299,6 +309,9 @@ class AlertMonitor:
             if any(self.city_matches_watched(c, watched) for c in cities):
                 if self.alert_is_all_clear(alert):
                     explicit_clear = True
+                elif self.alert_is_pre_alert(alert):
+                    # Title-based pre-alert detection (live API uses cat=10 + title phrase)
+                    pre_active = True
                 else:
                     cat = self.alert_cat(alert)
                     if cat in AlertMonitor.NON_EVENT_CATEGORIES:
