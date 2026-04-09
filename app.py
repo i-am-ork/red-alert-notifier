@@ -1,5 +1,4 @@
 """
-מעקב התרעות צבע אדום - חולון
 Flask backend that polls Pikud HaOref (oref.org.il) every 3 seconds
 and serves a Hebrew status dashboard.
 
@@ -11,6 +10,7 @@ Then open http://localhost:5000
 
 from flask import Flask, jsonify, render_template, request as flask_request
 import json
+import logging
 import os
 import re
 import requests
@@ -18,6 +18,31 @@ import threading
 import time
 from datetime import datetime
 import pytz
+
+# ── Logging setup ──────────────────────────────────────────────────────────
+
+_TZ_IL = pytz.timezone("Asia/Jerusalem")
+
+class _ILFormatter(logging.Formatter):
+    """Formats log records with Israel-local timestamps."""
+    def formatTime(self, record, datefmt=None):
+        dt = datetime.fromtimestamp(record.created, tz=_TZ_IL)
+        return dt.strftime("%Y-%m-%d %H:%M:%S")
+
+def _setup_logging() -> logging.Logger:
+    level = os.environ.get("LOG_LEVEL", "INFO").upper()
+    fmt = "%(asctime)s [%(levelname)s] %(message)s"
+    handler = logging.StreamHandler()
+    handler.setFormatter(_ILFormatter(fmt))
+    root = logging.getLogger()
+    root.handlers.clear()
+    root.addHandler(handler)
+    root.setLevel(getattr(logging, level, logging.INFO))
+    # Silence noisy werkzeug request logs at INFO level
+    logging.getLogger("werkzeug").setLevel(logging.WARNING)
+    return logging.getLogger("oref")
+
+log = _setup_logging()
 
 # ── Raw data cache (written by background thread, read per-request) ────────
 
@@ -74,9 +99,9 @@ class OrefClient:
         try:
             with open(cls._CITY_AREAS_FILE, encoding="utf-8") as f:
                 cls.city_areas = json.load(f)
-            print(f"[city_areas] loaded {len(cls.city_areas)} fallback entries", flush=True)
+            log.debug("city_areas: loaded %d fallback entries", len(cls.city_areas))
         except Exception as e:
-            print(f"[city_areas] could not load city_areas.json: {e}", flush=True)
+            log.warning("city_areas: could not load city_areas.json: %s", e)
 
     @staticmethod
     def get_area(city: str) -> str:
@@ -96,9 +121,9 @@ class OrefClient:
                 dynamic = cls.get_city_areas()
                 if dynamic:
                     cls.city_areas.update(dynamic)
-                    print(f"[oref cities] loaded {len(dynamic)} city→area mappings", flush=True)
+                    log.info("oref cities: loaded %d city→area mappings", len(dynamic))
             except Exception as exc:
-                print(f"[oref cities] failed: {exc}", flush=True)
+                log.warning("oref cities: failed: %s", exc)
         threading.Thread(target=_run, daemon=True, name="oref-cities").start()
 
     @staticmethod
@@ -135,7 +160,7 @@ class OrefClient:
                     if isinstance(data, list) and data:
                         return data
             except Exception as exc:
-                print(f"[oref history] {url}: {exc}", flush=True)
+                log.warning("oref history: %s: %s", url, exc)
         return []
 
     @staticmethod
@@ -160,7 +185,7 @@ class OrefClient:
                     result[name] = m.group(1)
             return result
         except Exception as exc:
-            print(f"[oref cities] {exc}")
+            log.warning("oref cities: %s", exc)
             return {}
 
 
@@ -207,7 +232,7 @@ class AlertMonitor:
             return
         ts = AlertMonitor.now().strftime("%H:%M:%S")
         suffix = f"  [{reason}]" if reason else ""
-        print(f"[status] {old} → {new}{suffix}  @ {ts}", flush=True)
+        log.info("status: %s → %s%s", old, new, suffix)
         self.status = new
 
     def get_status_dict(self) -> dict:
@@ -259,6 +284,12 @@ class AlertMonitor:
         return any(p in title for p in AlertMonitor.ALL_CLEAR_PHRASES) or entry.get("category", 0) == 13
 
     @staticmethod
+    def entry_is_pre_alert(entry: dict) -> bool:
+        title = entry.get("title", "")
+        cat   = entry.get("category", 0)
+        return cat in AlertMonitor.NON_EVENT_CATEGORIES or any(p in title for p in AlertMonitor.PRE_ALERT_PHRASES)
+
+    @staticmethod
     def alert_is_all_clear(alert: dict) -> bool:
         """Check if a real-time alert dict is actually an all-clear broadcast."""
         title = alert.get("title", "")
@@ -306,18 +337,23 @@ class AlertMonitor:
             cities = alert.get("data", [])
             with self._lock:
                 watched = set(self.watched_cities)
-            if any(self.city_matches_watched(c, watched) for c in cities):
+            matched = [c for c in cities if self.city_matches_watched(c, watched)]
+            if matched:
+                ts = AlertMonitor.now().strftime("%H:%M:%S")
                 if self.alert_is_all_clear(alert):
                     explicit_clear = True
+                    log.info("classify: CLEAR  cat=%s title='%s' cities=%s", alert.get('cat'), alert.get('title',''), matched[:3])
                 elif self.alert_is_pre_alert(alert):
-                    # Title-based pre-alert detection (live API uses cat=10 + title phrase)
                     pre_active = True
+                    log.info("classify: PRE    cat=%s title='%s' cities=%s", alert.get('cat'), alert.get('title',''), matched[:3])
                 else:
                     cat = self.alert_cat(alert)
                     if cat in AlertMonitor.NON_EVENT_CATEGORIES:
                         pre_active = True
+                        log.info("classify: PRE    cat=%d (NON_EVENT) cities=%s", cat, matched[:3])
                     elif cat != 0:
                         siren_active = True
+                        log.info("classify: SIREN  cat=%d title='%s' cities=%s", cat, alert.get('title',''), matched[:3])
 
         if api_ok:
             with self._lock:
@@ -334,7 +370,7 @@ class AlertMonitor:
                     self.last_clear_time = AlertMonitor.now().isoformat()
 
                 elif pre_active:
-                    if self.status == "normal":
+                    if self.status in ("normal", "clear"):
                         self._set_status("pre_alert", "live api")
 
                 elif prev_siren_active and not siren_active:
@@ -343,9 +379,10 @@ class AlertMonitor:
                         self._set_status("stay", "live api")
 
                 elif prev_pre_active and not pre_active:
-                    # Pre-warning lifted without a siren → back to normal
+                    # Pre-warning lifted → return to normal (or clear if we came from clear)
                     if self.status == "pre_alert":
-                        self._set_status("normal", "live api")
+                        target = "clear" if self.last_clear_time else "normal"
+                        self._set_status(target, "live api - pre lifted")
 
         return siren_active, pre_active
 
@@ -382,16 +419,20 @@ class AlertMonitor:
         with self._lock:
             # Backfill last siren time from history if missed (app restart etc.)
             if last_watched_siren_date and self.last_siren_time is None:
+                log.info("history: backfill last_siren_time = %s", last_watched_siren_date)
                 self.last_siren_time = last_watched_siren_date
 
             # Backfill last clear time from history if not yet set
             if last_watched_clear_date and self.last_clear_time is None:
+                log.info("history: backfill last_clear_time = %s", last_watched_clear_date)
                 self.last_clear_time = last_watched_clear_date
 
             # If we're waiting for the official all-clear and the most recent
             # watched event in history is an all-clear → advance state
             if self.status == "stay" and last_watched_event is not None:
                 if self.entry_is_all_clear(last_watched_event):
+                    log.info("history: stay→clear via cat=%s title='%s' date=%s",
+                             last_watched_event.get('category'), last_watched_event.get('title',''), last_watched_event.get('alertDate'))
                     self._set_status("clear", "history")
                     self.last_clear_time = last_watched_event.get("alertDate")
 
@@ -400,6 +441,8 @@ class AlertMonitor:
             # no subsequent all-clear, enter 'stay' so users know to stay sheltered.
             if self.status == "normal" and last_watched_event is not None:
                 if not self.entry_is_all_clear(last_watched_event):
+                    log.info("history: bootstrap stay via cat=%s title='%s' date=%s",
+                             last_watched_event.get('category'), last_watched_event.get('title',''), last_watched_event.get('alertDate'))
                     self._set_status("stay", "history bootstrap")
                     if last_watched_siren_date and self.last_siren_time is None:
                         self.last_siren_time = last_watched_siren_date
@@ -424,9 +467,26 @@ class AlertMonitor:
             if history:
                 self.process_history(history)
         except Exception as exc:
-            print(f"[oref history refresh] {exc}")
+            log.error("oref history refresh: %s", exc)
 
     # ── Background polling ─────────────────────────────────────────────────
+
+    def bootstrap(self) -> None:
+        """Initialize city areas, prefetch history, and start background polling.
+
+        Called once at startup. Kept as a method so it is easy to skip in tests.
+        """
+        OrefClient._init_city_areas()
+        try:
+            startup_history = OrefClient.get_history()
+            if startup_history:
+                self.process_history(startup_history)
+                _data_cache.update_history(startup_history)
+                log.info("startup: loaded %d history entries", len(startup_history))
+        except Exception as exc:
+            log.error("startup: history prefetch failed: %s", exc)
+        self.start_polling()
+        OrefClient.load_city_areas_async()
 
     def start_polling(self) -> None:
         threading.Thread(target=self._poll_loop, daemon=True, name="oref-poll").start()
@@ -444,15 +504,15 @@ class AlertMonitor:
                 alert = OrefClient.get_current_alert()
                 api_ok = True
             except Exception as exc:
-                print(f"[oref current] {exc}")
+                log.error("oref current: %s", exc)
 
             # Log every new distinct alert (helps diagnose pre-siren category)
             if alert != _last_logged_alert:
                 _last_logged_alert = alert
                 if alert:
-                    print(f"[alert] {json.dumps(alert, ensure_ascii=False)}", flush=True)
+                    log.info("alert: %s", json.dumps(alert, ensure_ascii=False))
                 else:
-                    print("[alert] cleared", flush=True)
+                    log.info("alert: cleared")
 
             prev_siren_active, prev_pre_active = self.do_alert_tick(
                 alert, api_ok, prev_siren_active, prev_pre_active
@@ -474,32 +534,24 @@ class AlertMonitor:
                         # Keep history cache in sync too
                         _data_cache.update_history(history)
                 except Exception as exc:
-                    print(f"[oref history] {exc}")
+                    log.error("oref history: %s", exc)
 
             time.sleep(AlertMonitor.ALERT_POLL_SEC)
 
 
 # ── Application setup ──────────────────────────────────────────────────────
 
-OrefClient._init_city_areas()
+# Declared at module level so Flask route functions can reference them directly.
 monitor = AlertMonitor()
-
-# Eagerly fetch history before Flask starts serving so that on startup the
-# server already knows about any unacknowledged sirens or all-clears, instead
-# of showing "normal" for up to 30 seconds after a cold start / redeploy.
-try:
-    _startup_history = OrefClient.get_history()
-    if _startup_history:
-        monitor.process_history(_startup_history)
-        _data_cache.update_history(_startup_history)
-        print(f"[startup] loaded {len(_startup_history)} history entries", flush=True)
-except Exception as _startup_exc:
-    print(f"[startup] history prefetch failed: {_startup_exc}", flush=True)
-
-monitor.start_polling()
-OrefClient.load_city_areas_async()
-
 app = Flask(__name__)
+
+_sha = os.environ.get("RAILWAY_GIT_COMMIT_SHA", "")
+APP_VERSION = _sha[:7] if _sha else "dev"
+_start_time = AlertMonitor.now()
+
+
+monitor.bootstrap()
+
 
 # ── API routes ─────────────────────────────────────────────────────────────
 
@@ -531,6 +583,8 @@ def api_status():
         if any(AlertMonitor.city_matches_watched(c, watched) for c in cities_in_alert):
             if AlertMonitor.alert_is_all_clear(alert):
                 explicit_clear = True
+            elif AlertMonitor.alert_is_pre_alert(alert):
+                pre_active = True
             else:
                 cat = AlertMonitor.alert_cat(alert)
                 if cat in AlertMonitor.NON_EVENT_CATEGORIES:
@@ -710,23 +764,20 @@ def api_history():
         if watched and not AlertMonitor.city_matches_watched(city, watched):
             continue
         cat = entry.get("category", 0)
-        is_clear = AlertMonitor.entry_is_all_clear(entry)
+        is_clear     = AlertMonitor.entry_is_all_clear(entry)
+        is_pre_alert = AlertMonitor.entry_is_pre_alert(entry)
         entries.append({
             "time": entry.get("alertDate", ""),
             "city": city,
             "title": entry.get("title", ""),
             "category": cat,
             "is_clear": is_clear,
+            "is_pre_alert": is_pre_alert,
         })
     return jsonify(entries)
 
 
 # ── HTML frontend ──────────────────────────────────────────────────────────
-
-_sha = os.environ.get("RAILWAY_GIT_COMMIT_SHA", "")
-APP_VERSION = _sha[:7] if _sha else "dev"
-_start_time = AlertMonitor.now()
-
 
 @app.route("/")
 def index():
@@ -736,7 +787,6 @@ def index():
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
     print("=" * 55)
-    print("  מעקב התרעות חולון — פיקוד העורף")
-    print(f"  פותח בכתובת: http://localhost:{port}")
+    print(f"  App starting on: http://localhost:{port}")
     print("=" * 55)
     app.run(debug=False, host="0.0.0.0", port=port, threaded=True)
